@@ -29,7 +29,7 @@ type (
 	Cell          struct {
 		pos   sdl.Point
 		state cellStateType
-		cell  int8
+		cell  cellStateType
 	}
 	// Минное поле
 	minesStateType int32
@@ -49,9 +49,9 @@ type (
 	}
 	// Наблюдатель строка меню
 	StatusLine struct {
-		buttons      []buttonsData
-		btnInstances []interface{}
-		newGameBoard boardConfig
+		buttons       []buttonsData
+		btnInstances  []interface{}
+		gameBoardSize boardConfig
 	}
 	// Наблюдатель поле игры
 	GameBoard struct {
@@ -74,7 +74,7 @@ type (
 	Event int
 	// Размеры минного поля
 	boardConfig struct {
-		row, column, mines, high, low int32
+		row, column, mines int32
 	}
 	// UI для sdl2
 	// Метка умеет выводить текст
@@ -158,12 +158,13 @@ const (
 
 // состояния ячеек
 const (
-	closed cellStateType = iota
+	closed cellStateType = (iota + 10)
 	flagged
 	questionable
 	opened
 	mined
 	saved
+	blown
 	firstMined
 	empty
 	wrongMines
@@ -505,16 +506,19 @@ func (s *Arrow) Render(renderer *sdl.Renderer) (err error) {
 :.....:::..::.....:::..::.....::.....:......:....::..:.....:
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::*/
+func (s *StatusLine) New(b boardConfig) {
+	s.gameBoardSize = b
+	s.Setup()
+}
 func (s *StatusLine) Setup() (err error) {
-	s.newGameBoard = boardConfig{row: 8, column: 8, mines: 10}
 	s.buttons = []buttonsData{
 		{name: buttonQuit, rect: sdl.Rect{0, 0, StatusLineHeight, StatusLineHeight}, text: "<-", event: []Event{QuitEvent}},
 		{name: buttonPause, rect: sdl.Rect{StatusLineHeight, 0, StatusLineHeight * 3, StatusLineHeight}, text: "Pause", event: []Event{PauseEvent}},
 		{name: buttonReset, rect: sdl.Rect{StatusLineHeight * 4, 0, StatusLineHeight * 3, StatusLineHeight}, text: "Reset", event: []Event{ResetGameEvent}},
 		{name: buttonNew, rect: sdl.Rect{StatusLineHeight * 7, 0, StatusLineHeight * 2, StatusLineHeight}, text: "New", event: []Event{NewGameEvent}},
-		{name: buttonRow, rect: sdl.Rect{StatusLineHeight * 9, 0, StatusLineHeight * 6, StatusLineHeight}, text: "Rows:" + strconv.Itoa(row), event: []Event{IncRowEvent, DecRowEvent}},
-		{name: buttonCol, rect: sdl.Rect{StatusLineHeight * 16, 0, StatusLineHeight * 6, StatusLineHeight}, text: "Columns:" + strconv.Itoa(column), event: []Event{IncRowEvent, DecRowEvent}},
-		{name: buttonMines, rect: sdl.Rect{StatusLineHeight * 23, 0, StatusLineHeight * 6, StatusLineHeight}, text: "Mines:" + strconv.Itoa(mines), event: []Event{IncRowEvent, DecRowEvent}}}
+		{name: buttonRow, rect: sdl.Rect{StatusLineHeight * 9, 0, StatusLineHeight * 6, StatusLineHeight}, text: "Rows:" + strconv.Itoa(int(s.gameBoardSize.row)), event: []Event{IncRowEvent, DecRowEvent}},
+		{name: buttonCol, rect: sdl.Rect{StatusLineHeight * 16, 0, StatusLineHeight * 6, StatusLineHeight}, text: "Columns:" + strconv.Itoa(int(s.gameBoardSize.column)), event: []Event{IncRowEvent, DecRowEvent}},
+		{name: buttonMines, rect: sdl.Rect{StatusLineHeight * 23, 0, StatusLineHeight * 6, StatusLineHeight}, text: "Mines:" + strconv.Itoa(int(s.gameBoardSize.mines)), event: []Event{IncRowEvent, DecRowEvent}}}
 	for _, button := range s.buttons {
 		switch button.name {
 		case buttonQuit:
@@ -565,25 +569,25 @@ func (s *StatusLine) Setup() (err error) {
 }
 
 func (s *StatusLine) GetGameBoardSize() boardConfig {
-	return s.newGameBoard
+	return s.gameBoardSize
 }
 
 func (s *StatusLine) Update(event Event) error {
 	switch event {
 	case NewGameEvent:
-		fmt.Printf("start new game:%v", s.newGameBoard)
+		fmt.Printf("start new game:%v", s.gameBoardSize)
 	case IncRowEvent: // Replace game board size by arrows
-		s.newGameBoard.row = int32(s.btnInstances[4].(*Arrow).GetNumber())
+		s.gameBoardSize.row = int32(s.btnInstances[4].(*Arrow).GetNumber())
 	case DecRowEvent:
-		s.newGameBoard.row = int32(s.btnInstances[4].(*Arrow).GetNumber())
+		s.gameBoardSize.row = int32(s.btnInstances[4].(*Arrow).GetNumber())
 	case IncColumnEvent:
-		s.newGameBoard.column = int32(s.btnInstances[5].(*Arrow).GetNumber())
+		s.gameBoardSize.column = int32(s.btnInstances[5].(*Arrow).GetNumber())
 	case DecColumnEvent:
-		s.newGameBoard.column = int32(s.btnInstances[5].(*Arrow).GetNumber())
+		s.gameBoardSize.column = int32(s.btnInstances[5].(*Arrow).GetNumber())
 	case IncMinesEvent:
-		s.newGameBoard.mines = int32(s.btnInstances[6].(*Arrow).GetNumber())
+		s.gameBoardSize.mines = int32(s.btnInstances[6].(*Arrow).GetNumber())
 	case DecMinesEvent:
-		s.newGameBoard.mines = int32(s.btnInstances[6].(*Arrow).GetNumber())
+		s.gameBoardSize.mines = int32(s.btnInstances[6].(*Arrow).GetNumber())
 	}
 	for idx, button := range s.btnInstances {
 		switch button.(type) {
@@ -725,23 +729,18 @@ func (s *StatusLine) calc(name buttonsType, instance *Arrow, op string) {
 :::::8 :::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 :::::..:::::::::::::::::::::::::::::::::::::::::::::::::::::::::*/
 func (s *GameBoard) New(b boardConfig) (err error) {
-	s.gameBoardSize = boardConfig{row: b.row, column: b.column, mines: b.mines}
+	s.gameBoardSize = b
 	s.Setup()
 	return nil
 }
 
 func (s *GameBoard) Setup() (err error) {
-	var x, y, w, h, dx, dy, boardColumn int32
+	var x, y, w, h, dx, dy int32
 	s.colors = []sdl.Color{sdl.Color{192, 192, 192, 255}, sdl.Color{0, 0, 255, 255}, sdl.Color{0, 128, 0, 255}, sdl.Color{255, 0, 0, 255}, sdl.Color{0, 0, 128, 255}, sdl.Color{128, 0, 0, 255}, sdl.Color{0, 128, 128, 255}, sdl.Color{0, 0, 0, 255}, sdl.Color{128, 128, 128, 255}}
 	w, h = int32(float64(WinHeight)/1.1), int32(float64(WinHeight)/1.1)
 	x, y = (WinHeight-w)/2, (WinHeight-h)/2+StatusLineHeight/2
 	s.rect = sdl.Rect{x, y, w, h}
-	if s.gameBoardSize.row > s.gameBoardSize.column {
-		boardColumn = s.gameBoardSize.row
-	} else {
-		boardColumn = s.gameBoardSize.column
-	}
-	s.cellWidth, s.cellHeight = w/boardColumn, (h-StatusLineHeight*2)/boardColumn
+	s.cellWidth, s.cellHeight = w/s.gameBoardSize.row, (h-StatusLineHeight*2)/s.gameBoardSize.column
 	cellFontSize := s.cellHeight - 3
 	if len(s.btnInstances) > 0 {
 		s.btnInstances = nil
@@ -753,7 +752,7 @@ func (s *GameBoard) Setup() (err error) {
 			w = s.cellWidth
 			h = s.cellHeight
 			b := &Button{}
-			if err := b.New(sdl.Rect{x, y, w, h}, " ", s.colors[7], s.colors[0], cellFontSize); err != nil {
+			if err := b.New(sdl.Rect{x, y, w, h}, " ", s.colors[7], s.colors[8], cellFontSize); err != nil {
 				panic(err)
 			}
 			s.btnInstances = append(s.btnInstances, b)
@@ -773,36 +772,61 @@ func (s *GameBoard) Setup() (err error) {
 	return nil
 }
 
-func (s *GameBoard) SetBoard(board []int8) {
+func (s *GameBoard) SetBoard(board []cellStateType) {
 	for idx, button := range s.btnInstances {
 		switch button.(type) {
 		case *Button:
-			if board[idx] == 0 {
+			switch board[idx] {
+			case 0:
 				s.btnInstances[idx].(*Button).SetLabel(" ")
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
-			} else if board[idx] == 1 {
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
+			case 1:
 				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
 				s.btnInstances[idx].(*Button).SetForeground(s.colors[1])
-			} else if board[idx] == 2 {
+			case 2:
 				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
 				s.btnInstances[idx].(*Button).SetForeground(s.colors[2])
-			} else if board[idx] == 3 {
+			case 3:
 				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
 				s.btnInstances[idx].(*Button).SetForeground(s.colors[3])
-			} else if board[idx] == 4 {
+			case 4:
 				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
 				s.btnInstances[idx].(*Button).SetForeground(s.colors[4])
-			} else if board[idx] == 5 {
+			case 5:
 				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
 				s.btnInstances[idx].(*Button).SetForeground(s.colors[5])
-			} else if board[idx] == -9 {
+			case 6:
+				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[6])
+			case 7:
+				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
+			case 8:
+				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
+			case mined:
 				s.btnInstances[idx].(*Button).SetLabel("*")
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
+			case closed:
+				s.btnInstances[idx].(*Button).SetLabel(" ")
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[8])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
+			case flagged:
+				s.btnInstances[idx].(*Button).SetLabel("F")
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
+			case questionable:
+				s.btnInstances[idx].(*Button).SetLabel("?")
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
 				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
 			}
@@ -848,6 +872,11 @@ func (s *GameBoard) Event(event sdl.Event) (e Event, err error) {
 					s.mousePressedAtButton = int32(idx)
 					return MouseButtonLeftReleasedEvent, nil
 				}
+				if ok := button.(*Button).Event(event); ok == MouseButtonRightReleased {
+					fmt.Printf("%v Right Released At:%v %v %v\n", idx, t.X, t.Y, button)
+					s.mousePressedAtButton = int32(idx)
+					return MouseButtonRightReleasedEvent, nil
+				}
 			}
 		}
 	}
@@ -878,32 +907,32 @@ func (s *Cell) GetState() cellStateType {
 func (s *Cell) SetState(value cellStateType) {
 	s.state = value
 }
-func (s *Cell) GetCell() int8 {
+func (s *Cell) GetCell() cellStateType {
 	return s.cell
 }
 func (s *Cell) GetMines() bool {
-	return s.cell == -9
+	return s.cell == mined
 }
 func (s *Cell) SetMines() {
-	s.cell = -9
+	s.cell = mined
 }
 func (s *Cell) GetFirstMines() bool {
-	return s.cell == -10
+	return s.cell == firstMined
 }
 func (s *Cell) SetFirstMines() {
-	s.cell = -10
+	s.cell = firstMined
 }
 func (s *Cell) GetSavedMines() bool {
-	return s.cell == -11
+	return s.cell == saved
 }
 func (s *Cell) SetSavedMines() {
-	s.cell = -11
+	s.cell = saved
 }
 func (s *Cell) GetBlownMines() bool {
-	return s.cell == -12
+	return s.cell == blown
 }
 func (s *Cell) SetBlownMines() {
-	s.cell = -12
+	s.cell = blown
 }
 func (s *Cell) GetWrongMines() bool {
 	return s.cell == -s.cell
@@ -911,17 +940,35 @@ func (s *Cell) GetWrongMines() bool {
 func (s *Cell) SetWrongMines() {
 	s.cell = -s.cell
 }
-func (s *Cell) GetNumber() int8 {
+func (s *Cell) GetNumber() cellStateType {
 	return s.cell
 }
-func (s *Cell) SetNumber(value int8) {
+func (s *Cell) SetNumber(value cellStateType) {
 	s.cell = value
-	fmt.Println(s.cell)
+}
+func (s *Cell) GetClosed() bool {
+	return s.cell == closed
+}
+func (s *Cell) SetClosed() {
+	s.cell = closed
+}
+func (s *Cell) GetFlagged() bool {
+	return s.cell == flagged
+}
+func (s *Cell) SetFlagged() {
+	s.cell = flagged
+}
+func (s *Cell) GetQuestioned() bool {
+	return s.cell == questionable
+}
+func (s *Cell) SetQuestioned() {
+	s.cell = questionable
 }
 
 func (s *Cell) Open() {
 	if s.state == closed || s.state == questionable {
 		s.state = opened
+		fmt.Println("opened", s)
 	}
 }
 
@@ -951,13 +998,6 @@ o8oo   o8 .oPYo. 8 .oPYo8
 ::::::::::::::::::::::::::*/
 func (s *Field) New(boardSize boardConfig) (err error) {
 	s.boardSize = boardSize
-	if s.boardSize.row > s.boardSize.column {
-		s.boardSize.high = s.boardSize.row
-		s.boardSize.low = s.boardSize.column
-	} else {
-		s.boardSize.high = s.boardSize.column
-		s.boardSize.low = s.boardSize.row
-	}
 	if len(s.field) > 0 {
 		s.field = nil
 	}
@@ -976,7 +1016,7 @@ func (s *Field) New(boardSize boardConfig) (err error) {
 
 func (s *Field) Setup(firstMoveIdx int32) {
 	var mines, x, y int32
-	firstMovePos, _ := s.getPos(firstMoveIdx)
+	firstMovePos, _ := s.getPosOfCell(firstMoveIdx)
 	for mines < s.boardSize.mines {
 		x, y = int32(rand.Intn(int(s.boardSize.row))), int32(rand.Intn(int(s.boardSize.column)))
 		if x == firstMovePos.X && y == firstMovePos.Y {
@@ -990,7 +1030,7 @@ func (s *Field) Setup(firstMoveIdx int32) {
 		}
 	}
 	for idx, cell := range s.field {
-		var count int8
+		var count cellStateType
 		if !cell.GetMines() {
 			neighbours := s.getNeighbours(int32(idx))
 			for _, cell := range neighbours {
@@ -1000,30 +1040,30 @@ func (s *Field) Setup(firstMoveIdx int32) {
 				}
 			}
 			s.field[idx].SetNumber(count)
-			fmt.Printf("s:%v,cell:%v,count:%v\n", s, cell, count)
+			// fmt.Printf("s:%v,cell:%v,count:%v\n", s, cell, count)
 		}
 	}
 }
 
-func (s *Field) isEdge(x, y int32) bool {
+func (s *Field) isFieldEdge(x, y int32) bool {
 	return x < 0 || x > s.boardSize.row-1 || y < 0 || y > s.boardSize.column-1
 }
 
 func (s *Field) getNeighbours(idx int32) (cells []*Cell) {
 	var dx, dy, nx, ny int32
-	pos, _ := s.getPos(idx)
+	pos, _ := s.getPosOfCell(idx)
 	for dy = -1; dy < 2; dy++ {
 		for dx = -1; dx < 2; dx++ {
 			nx = pos.X + dx
 			ny = pos.Y + dy
-			if !s.isEdge(nx, ny) {
+			if !s.isFieldEdge(nx, ny) {
 				// fmt.Printf("pos:%v,dx:%v,dy:%v,nx:%v,ny:%v\n", pos, dx, dy, nx, ny)
 				_, newCell := s.getIdxOfCell(nx, ny)
 				cells = append(cells, newCell)
 			}
 		}
 	}
-	fmt.Println(cells, len(cells))
+	// fmt.Println(cells, len(cells))
 	return cells
 }
 func (s *Field) getIdxOfCell(x, y int32) (idx int32, cell *Cell) {
@@ -1032,17 +1072,38 @@ func (s *Field) getIdxOfCell(x, y int32) (idx int32, cell *Cell) {
 	cell = &s.field[idx]
 	return idx, cell
 }
-func (s *Field) getPos(idx int32) (pos sdl.Point, cell *Cell) {
+func (s *Field) getPosOfCell(idx int32) (pos sdl.Point, cell *Cell) {
 	pos.X, pos.Y = idx%s.boardSize.row, idx/s.boardSize.column
 	cell = &s.field[idx]
 	return pos, cell
 }
 
-func (s *Field) GetFieldValues() (board []int8) {
+func (s *Field) GetFieldValues() (board []cellStateType) {
 	for _, cell := range s.field {
-		board = append(board, cell.cell)
+		if cell.state == closed || cell.state == flagged || cell.state == questionable {
+			board = append(board, cell.state)
+		} else if cell.state == opened {
+			board = append(board, cell.cell)
+		}
 	}
+	fmt.Println("send board:", board)
 	return board
+}
+
+func (s *Field) Open(idx int32) {
+	pos, cell := s.getPosOfCell(idx)
+	if s.isFieldEdge(pos.X, pos.Y) {
+		return
+	}
+	cell.Open()
+}
+
+func (s *Field) Mark(idx int32) {
+	pos, cell := s.getPosOfCell(idx)
+	if s.isFieldEdge(pos.X, pos.Y) {
+		return
+	}
+	cell.Mark()
 }
 
 func (s *Field) String() string {
@@ -1051,7 +1112,8 @@ func (s *Field) String() string {
 	for y = 0; y < s.boardSize.column; y++ {
 		board += "\n"
 		for x = 0; x < s.boardSize.row; x++ {
-			board += fmt.Sprintf("%2v", s.field[y*s.boardSize.row+x].cell)
+			_, cell := s.getIdxOfCell(x, y)
+			board += fmt.Sprintf("%3v", cell.cell)
 		}
 	}
 	return board
@@ -1177,15 +1239,15 @@ func (s *View) GetEvents(o []Observers) (events []Event) {
 :::::::8 :::::::::::::::::::::::::::::::::
 :::::::..:::::::::::::::::::::::::::::::::*/
 func (s *Spinner) Run(m Mines, v View) {
-	defaultSize := boardConfig{row: 2, column: 3, mines: 1}
+	defaultSize := boardConfig{row: 5, column: 5, mines: 5}
 	rand.Seed(time.Now().UTC().UnixNano())
-	s.mines = Mines{}
+	s.mines = m
 	s.mines.New(defaultSize)
 	if err := v.Setup(); err != nil {
 		panic(err)
 	}
 	statusLine := &StatusLine{}
-	statusLine.Setup()
+	statusLine.New(defaultSize)
 	s.mines.Attach(statusLine)
 	board := &GameBoard{}
 	board.New(defaultSize)
@@ -1201,30 +1263,36 @@ func (s *Spinner) Run(m Mines, v View) {
 			case TickEvent:
 				dirty = true
 			case NewGameEvent:
-				fmt.Printf("start new game:%v", statusLine.newGameBoard)
-				s.mines.field.New(statusLine.newGameBoard)
-				board.New(statusLine.newGameBoard)
+				fmt.Printf("start new game:%v", statusLine.gameBoardSize)
+				s.mines.field.New(statusLine.gameBoardSize)
+				board.New(statusLine.gameBoardSize)
 				firstMove = true
 			case MouseButtonLeftReleasedEvent:
 				if firstMove {
 					s.mines.field.Setup(board.mousePressedAtButton)
 					board.SetBoard(s.mines.field.GetFieldValues())
+					s.mines.field.Open(board.mousePressedAtButton)
 					firstMove = false
+				} else {
+					s.mines.field.Open(board.mousePressedAtButton)
+					board.SetBoard(s.mines.field.GetFieldValues())
 				}
-				fmt.Println(board.mousePressedAtButton)
+			case MouseButtonRightReleasedEvent:
+				s.mines.field.Mark(board.mousePressedAtButton)
+				board.SetBoard(s.mines.field.GetFieldValues())
 				// board
 			case IncRowEvent: // Replace game board size by arrows
-				statusLine.newGameBoard.row = int32(statusLine.btnInstances[4].(*Arrow).GetNumber())
+				statusLine.gameBoardSize.row = int32(statusLine.btnInstances[4].(*Arrow).GetNumber())
 			case DecRowEvent:
-				statusLine.newGameBoard.row = int32(statusLine.btnInstances[4].(*Arrow).GetNumber())
+				statusLine.gameBoardSize.row = int32(statusLine.btnInstances[4].(*Arrow).GetNumber())
 			case IncColumnEvent:
-				statusLine.newGameBoard.column = int32(statusLine.btnInstances[5].(*Arrow).GetNumber())
+				statusLine.gameBoardSize.column = int32(statusLine.btnInstances[5].(*Arrow).GetNumber())
 			case DecColumnEvent:
-				statusLine.newGameBoard.column = int32(statusLine.btnInstances[5].(*Arrow).GetNumber())
+				statusLine.gameBoardSize.column = int32(statusLine.btnInstances[5].(*Arrow).GetNumber())
 			case IncMinesEvent:
-				statusLine.newGameBoard.mines = int32(statusLine.btnInstances[6].(*Arrow).GetNumber())
+				statusLine.gameBoardSize.mines = int32(statusLine.btnInstances[6].(*Arrow).GetNumber())
 			case DecMinesEvent:
-				statusLine.newGameBoard.mines = int32(statusLine.btnInstances[6].(*Arrow).GetNumber())
+				statusLine.gameBoardSize.mines = int32(statusLine.btnInstances[6].(*Arrow).GetNumber())
 			}
 			s.mines.Notify(event)
 		}
