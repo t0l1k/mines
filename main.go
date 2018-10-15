@@ -25,11 +25,11 @@ type (
 		field      Field
 	}
 	// Ячейка поля
-	cellStateType int32
-	Cell          struct {
-		pos   sdl.Point
-		state cellStateType
-		cell  cellStateType
+	Cell struct {
+		pos     sdl.Point
+		state   int32
+		mined   bool
+		counter int32
 	}
 	// Минное поле
 	minesStateType int32
@@ -158,7 +158,7 @@ const (
 
 // состояния ячеек
 const (
-	closed cellStateType = (iota + 10)
+	closed int32 = (iota + 10)
 	flagged
 	questionable
 	opened
@@ -191,7 +191,7 @@ const (
 )
 
 var (
-	mn                   int32 = 3
+	mn                   int32 = 2
 	WinWidth, WinHeight  int32 = 320 * mn, 180 * mn
 	row, column, mines   int   = 8, 8, 10
 	FontName                   = "data/Roboto-Regular.ttf"
@@ -772,7 +772,7 @@ func (s *GameBoard) Setup() (err error) {
 	return nil
 }
 
-func (s *GameBoard) SetBoard(board []cellStateType) {
+func (s *GameBoard) SetBoard(board []int32) {
 	for idx, button := range s.btnInstances {
 		switch button.(type) {
 		case *Button:
@@ -817,6 +817,10 @@ func (s *GameBoard) SetBoard(board []cellStateType) {
 				s.btnInstances[idx].(*Button).SetLabel("*")
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
 				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
+			case firstMined:
+				s.btnInstances[idx].(*Button).SetLabel("*")
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[3])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
 			case closed:
 				s.btnInstances[idx].(*Button).SetLabel(" ")
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[8])
@@ -843,6 +847,7 @@ func (s *GameBoard) Update(event Event) error {
 	}
 	return nil
 }
+
 func (s *GameBoard) Render(renderer *sdl.Renderer) (err error) {
 	renderer.SetDrawColor(s.colors[0].R, s.colors[0].G, s.colors[0].B, s.colors[0].A)
 	renderer.DrawRect(&s.rect)
@@ -897,72 +902,76 @@ func (s *GameBoard) Event(event sdl.Event) (e Event, err error) {
 func (s *Cell) New(pos sdl.Point) (err error) {
 	s.pos = pos
 	s.state = closed
-	s.cell = 0
+	s.mined = false
+	s.counter = -1
 	return nil
 }
 
-func (s *Cell) GetState() cellStateType {
+func (s *Cell) GetState() int32 {
 	return s.state
 }
-func (s *Cell) SetState(value cellStateType) {
+func (s *Cell) SetState(value int32) {
 	s.state = value
 }
-func (s *Cell) GetCell() cellStateType {
-	return s.cell
-}
 func (s *Cell) GetMines() bool {
-	return s.cell == mined
+	return s.mined
+}
+func (s *Cell) GetMined() bool {
+	return s.state == mined
 }
 func (s *Cell) SetMines() {
-	s.cell = mined
+	s.mined = true
 }
 func (s *Cell) GetFirstMines() bool {
-	return s.cell == firstMined
+	return s.state == firstMined
 }
 func (s *Cell) SetFirstMines() {
-	s.cell = firstMined
+	s.state = firstMined
 }
 func (s *Cell) GetSavedMines() bool {
-	return s.cell == saved
+	return s.state == saved
 }
 func (s *Cell) SetSavedMines() {
-	s.cell = saved
+	s.state = saved
 }
 func (s *Cell) GetBlownMines() bool {
-	return s.cell == blown
+	return s.state == blown
 }
 func (s *Cell) SetBlownMines() {
-	s.cell = blown
+	s.state = blown
 }
 func (s *Cell) GetWrongMines() bool {
-	return s.cell == -s.cell
+	return s.state == wrongMines
 }
 func (s *Cell) SetWrongMines() {
-	s.cell = -s.cell
+	s.state = wrongMines
 }
-func (s *Cell) GetNumber() cellStateType {
-	return s.cell
+func (s *Cell) GetNumber() int32 {
+	return s.counter
 }
-func (s *Cell) SetNumber(value cellStateType) {
-	s.cell = value
+func (s *Cell) SetNumber(value int32) {
+	s.counter = value
 }
 func (s *Cell) GetClosed() bool {
-	return s.cell == closed
+	return s.state == closed
 }
 func (s *Cell) SetClosed() {
-	s.cell = closed
+	s.state = closed
+}
+func (s *Cell) GetOpened() bool {
+	return s.state == opened
 }
 func (s *Cell) GetFlagged() bool {
-	return s.cell == flagged
+	return s.state == flagged
 }
 func (s *Cell) SetFlagged() {
-	s.cell = flagged
+	s.state = flagged
 }
 func (s *Cell) GetQuestioned() bool {
-	return s.cell == questionable
+	return s.state == questionable
 }
 func (s *Cell) SetQuestioned() {
-	s.cell = questionable
+	s.state = questionable
 }
 
 func (s *Cell) Open() {
@@ -983,7 +992,32 @@ func (s *Cell) Mark() {
 }
 
 func (s *Cell) String() string {
-	return fmt.Sprintf("Cell x:%v y:%v state:%v cell:%v\n", s.pos.X, s.pos.Y, s.state, s.cell)
+	var state string
+	switch s.state {
+	case closed:
+		state = "closed"
+	case flagged:
+		state = "flagged"
+	case questionable:
+		state = "questionable"
+	case opened:
+		state = "opened"
+	case mined:
+		state = "mined"
+	case saved:
+		state = "saved"
+	case blown:
+		state = "blown"
+	case firstMined:
+		state = "first mined"
+	case empty:
+		state = "empty"
+	case wrongMines:
+		state = "wrong mined"
+	case marked:
+		state = "marked"
+	}
+	return fmt.Sprintf("Cell x:%v y:%v state:%v count:%v mined:%v\n", s.pos.X, s.pos.Y, state, s.counter, s.mined)
 }
 
 /*
@@ -1001,16 +1035,17 @@ func (s *Field) New(boardSize boardConfig) (err error) {
 	if len(s.field) > 0 {
 		s.field = nil
 	}
-	var column, row, x, y int32
-	for column = 0; column < boardSize.column; column++ {
-		for row = 0; row < boardSize.row; row++ {
+	var column, row int32
+	for column = 0; column < s.boardSize.column; column++ {
+		for row = 0; row < s.boardSize.row; row++ {
 			cell := Cell{}
-			x = row % boardSize.row
-			y = column / boardSize.column
-			cell.New(sdl.Point{x, y})
+			cell.New(sdl.Point{row, column})
 			s.field = append(s.field, cell)
+			fmt.Println("Init Field:", cell, row, column)
 		}
 	}
+	s.state = gameStart
+	fmt.Println(s)
 	return nil
 }
 
@@ -1023,54 +1058,62 @@ func (s *Field) Setup(firstMoveIdx int32) {
 			fmt.Println("get rand again")
 			continue
 		}
-		_, cell := s.getIdxOfCell(x, y)
+		_, cell, err := s.getIdxOfCell(x, y)
+		if err != nil {
+			panic(err)
+		}
 		if !cell.GetMines() {
 			cell.SetMines()
 			mines++
 		}
 	}
 	for idx, cell := range s.field {
-		var count cellStateType
+		var count int32
 		if !cell.GetMines() {
-			neighbours := s.getNeighbours(int32(idx))
+			pos, _ := s.getPosOfCell(int32(idx))
+			neighbours := s.getNeighbours(pos.X, pos.Y)
 			for _, cell := range neighbours {
 				if cell.GetMines() {
-					fmt.Println("count:", count)
 					count++
 				}
 			}
 			s.field[idx].SetNumber(count)
-			// fmt.Printf("s:%v,cell:%v,count:%v\n", s, cell, count)
 		}
 	}
+	s.state = gamePlay
+	fmt.Println(s)
 }
 
 func (s *Field) isFieldEdge(x, y int32) bool {
 	return x < 0 || x > s.boardSize.row-1 || y < 0 || y > s.boardSize.column-1
 }
 
-func (s *Field) getNeighbours(idx int32) (cells []*Cell) {
+func (s *Field) getNeighbours(x, y int32) (cells []*Cell) {
 	var dx, dy, nx, ny int32
-	pos, _ := s.getPosOfCell(idx)
 	for dy = -1; dy < 2; dy++ {
 		for dx = -1; dx < 2; dx++ {
-			nx = pos.X + dx
-			ny = pos.Y + dy
+			nx = x + dx
+			ny = y + dy
 			if !s.isFieldEdge(nx, ny) {
-				// fmt.Printf("pos:%v,dx:%v,dy:%v,nx:%v,ny:%v\n", pos, dx, dy, nx, ny)
-				_, newCell := s.getIdxOfCell(nx, ny)
+				_, newCell, err := s.getIdxOfCell(nx, ny)
+				if err != nil {
+					panic(err)
+				}
 				cells = append(cells, newCell)
+				fmt.Printf("x:%v,y:%v,nx:%v,ny:%v,cells:%v\n", x, y, nx, ny, cells)
 			}
 		}
 	}
-	// fmt.Println(cells, len(cells))
+	fmt.Println("cells:", cells)
 	return cells
 }
-func (s *Field) getIdxOfCell(x, y int32) (idx int32, cell *Cell) {
-	// fmt.Printf("x:%v,y:%v\n", x, y)
-	idx = y*s.boardSize.row + x
-	cell = &s.field[idx]
-	return idx, cell
+func (s *Field) getIdxOfCell(x, y int32) (idx int32, cell *Cell, err error) {
+	if !s.isFieldEdge(x, y) {
+		idx = y*s.boardSize.row + x
+		cell = &s.field[idx]
+		return idx, cell, nil
+	}
+	return -1, nil, fmt.Errorf("getIdxOfCell:get wrong index x:%v,y:%v,err:%v", x, y, err)
 }
 func (s *Field) getPosOfCell(idx int32) (pos sdl.Point, cell *Cell) {
 	pos.X, pos.Y = idx%s.boardSize.row, idx/s.boardSize.column
@@ -1078,24 +1121,34 @@ func (s *Field) getPosOfCell(idx int32) (pos sdl.Point, cell *Cell) {
 	return pos, cell
 }
 
-func (s *Field) GetFieldValues() (board []cellStateType) {
-	for _, cell := range s.field {
-		if cell.state == closed || cell.state == flagged || cell.state == questionable {
-			board = append(board, cell.state)
-		} else if cell.state == opened {
-			board = append(board, cell.cell)
-		}
+func (s *Field) Open(x, y int32) {
+	if s.isFieldEdge(x, y) {
+		fmt.Printf("Open Field Cell Edge x:%v,y:%v", x, y)
+		return
 	}
-	fmt.Println("send board:", board)
-	return board
-}
-
-func (s *Field) Open(idx int32) {
-	pos, cell := s.getPosOfCell(idx)
-	if s.isFieldEdge(pos.X, pos.Y) {
+	_, cell, err := s.getIdxOfCell(x, y)
+	if err != nil {
+		panic(err)
+	}
+	if cell.GetFlagged() || cell.GetOpened() {
+		fmt.Printf("Opened or Flagged Field x:%v,y:%v,cell:%v", x, y, cell)
 		return
 	}
 	cell.Open()
+	fmt.Printf("Open Field Cell Open x:%v,y:%v,cell:%v", x, y, cell)
+	if cell.GetMines() {
+		cell.SetFirstMines()
+		s.state = gameOver
+		fmt.Printf("Open Field Cell Mined x:%v,y:%v,cell:%v", x, y, cell)
+		return
+	}
+	if cell.GetNumber() > 0 {
+		fmt.Printf("Open Field Cell Number x:%v,y:%v,cell:%v", x, y, cell)
+		return
+	}
+	for _, nCell := range s.getNeighbours(x, y) {
+		s.Open(nCell.pos.X, nCell.pos.Y)
+	}
 }
 
 func (s *Field) Mark(idx int32) {
@@ -1106,14 +1159,39 @@ func (s *Field) Mark(idx int32) {
 	cell.Mark()
 }
 
+func (s *Field) GetFieldValues() (board []int32) {
+	for _, cell := range s.field {
+		if cell.state == closed || cell.state == flagged || cell.state == questionable {
+			board = append(board, cell.state)
+		} else if cell.state >= opened {
+			if cell.GetFirstMines() {
+				board = append(board, firstMined)
+			} else if cell.GetMined() {
+				board = append(board, mined)
+			} else {
+				board = append(board, cell.counter)
+			}
+		}
+	}
+	fmt.Println("send board:", board)
+	return board
+}
+
 func (s *Field) String() string {
 	var x, y int32
 	board := ""
 	for y = 0; y < s.boardSize.column; y++ {
 		board += "\n"
 		for x = 0; x < s.boardSize.row; x++ {
-			_, cell := s.getIdxOfCell(x, y)
-			board += fmt.Sprintf("%3v", cell.cell)
+			_, cell, err := s.getIdxOfCell(x, y)
+			if err != nil {
+				panic(err)
+			}
+			if cell.counter >= 0 {
+				board += fmt.Sprintf("%3v", cell.counter)
+			} else if cell.mined {
+				board += fmt.Sprintf("%3v", "*")
+			}
 		}
 	}
 	return board
@@ -1270,11 +1348,13 @@ func (s *Spinner) Run(m Mines, v View) {
 			case MouseButtonLeftReleasedEvent:
 				if firstMove {
 					s.mines.field.Setup(board.mousePressedAtButton)
+					pos, _ := s.mines.field.getPosOfCell(board.mousePressedAtButton)
+					s.mines.field.Open(pos.X, pos.Y)
 					board.SetBoard(s.mines.field.GetFieldValues())
-					s.mines.field.Open(board.mousePressedAtButton)
 					firstMove = false
 				} else {
-					s.mines.field.Open(board.mousePressedAtButton)
+					pos, _ := s.mines.field.getPosOfCell(board.mousePressedAtButton)
+					s.mines.field.Open(pos.X, pos.Y)
 					board.SetBoard(s.mines.field.GetFieldValues())
 				}
 			case MouseButtonRightReleasedEvent:
