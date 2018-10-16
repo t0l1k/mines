@@ -24,7 +24,7 @@ type (
 		subsribers []Observers
 		field      Field
 	}
-	// Ячейка поля
+	// Ячейка минного поля
 	Cell struct {
 		pos     sdl.Point
 		state   int32
@@ -144,8 +144,6 @@ const (
 	MouseButtonLeftReleasedEvent
 	MouseButtonRightPressedEvent
 	MouseButtonRightReleasedEvent
-	GameWinMessageEvent
-	GameOverMessageEvent
 )
 
 // перечень кнопок строки статуса
@@ -171,7 +169,7 @@ const (
 	MouseButtonRightReleased
 )
 
-// состояния ячеек
+// состояния ячеек минного поля
 const (
 	closed int32 = (iota + 10)
 	flagged
@@ -198,7 +196,7 @@ const (
 	gameOver
 )
 
-// константы размеров поля
+// константы размеров минного поля
 const (
 	minRow    = 5
 	maxRow    = 30
@@ -565,7 +563,6 @@ func (s *Arrow) Event(event sdl.Event) (e Event, err error) {
 						}
 					}
 				}
-			case *Label:
 			}
 		}
 	}
@@ -577,7 +574,6 @@ func (s *Arrow) Update(event Event) {
 		switch s.btnInstances[i].(type) {
 		case *Button:
 			s.btnInstances[i].(*Button).Update()
-		case *Label:
 		}
 	}
 }
@@ -1033,12 +1029,10 @@ func (s *GameBoard) Event(event sdl.Event) (e Event, err error) {
 			switch button.(type) {
 			case *Button:
 				if ok := button.(*Button).Event(event); ok == MouseButtonLeftReleased && s.messageBox.Hide {
-					// fmt.Printf("%v Left Released At:%v %v %v\n", idx, t.X, t.Y, button)
 					s.mousePressedAtButton = int32(idx)
 					return MouseButtonLeftReleasedEvent, nil
 				}
 				if ok := button.(*Button).Event(event); ok == MouseButtonRightReleased && s.messageBox.Hide {
-					// fmt.Printf("%v Right Released At:%v %v %v\n", idx, t.X, t.Y, button)
 					s.mousePressedAtButton = int32(idx)
 					return MouseButtonRightReleasedEvent, nil
 				}
@@ -1046,7 +1040,6 @@ func (s *GameBoard) Event(event sdl.Event) (e Event, err error) {
 				if ok := button.(*MessageBox).Event(event); ok {
 					fmt.Printf("%v MessageBox ok released:%v %v %v\n", idx, t.X, t.Y, button)
 					s.btnInstances[idx].(*MessageBox).Hide = true
-					// return MouseButtonLeftReleasedEvent, nil
 				}
 			}
 		}
@@ -1146,7 +1139,7 @@ func (s *Cell) Open() {
 	}
 }
 
-func (s *Cell) Mark() {
+func (s *Cell) MarkFlag() {
 	if s.state == closed {
 		s.state = flagged
 	} else if s.state == flagged {
@@ -1324,12 +1317,12 @@ func (s *Field) autoMarkFlags(x, y int32) {
 	}
 }
 
-func (s *Field) Mark(idx int32) {
+func (s *Field) MarkFlag(idx int32) {
 	pos, cell := s.getPosOfCell(idx)
 	if s.isFieldEdge(pos.X, pos.Y) {
 		return
 	}
-	cell.Mark()
+	cell.MarkFlag()
 }
 
 func (s *Field) isWin() bool {
@@ -1340,9 +1333,9 @@ func (s *Field) isWin() bool {
 		}
 	}
 	if count+s.boardSize.mines == s.boardSize.row*s.boardSize.column {
-		for _, cell := range s.field {
+		for idx, cell := range s.field {
 			if cell.GetMines() {
-				cell.SetSavedMines()
+				s.field[idx].SetSavedMines()
 			}
 		}
 		s.state = gameWin
@@ -1353,14 +1346,12 @@ func (s *Field) isWin() bool {
 
 func (s *Field) isGameOver() bool {
 	if s.state == gameOver {
-		for idx, cell := range s.field {
-			if cell.GetMines() {
+		for idx, cell := range s.field[:] {
+			if cell.GetMines() && cell.GetClosed() {
 				s.field[idx].Open()
-				if cell.GetFlagged() {
-					s.field[idx].SetSavedMines()
-				} else {
-					s.field[idx].SetBlownMines()
-				}
+				s.field[idx].SetBlownMines()
+			} else if cell.GetFlagged() && cell.GetMines() {
+				s.field[idx].SetSavedMines()
 			}
 		}
 	} else {
@@ -1379,9 +1370,9 @@ func (s *Field) GetFieldValues() (board []int32) {
 			} else if cell.GetMined() {
 				board = append(board, mined)
 			} else if cell.GetSavedMines() {
-				board = append(board, mined)
+				board = append(board, saved)
 			} else if cell.GetBlownMines() {
-				board = append(board, mined)
+				board = append(board, blown)
 			} else {
 				board = append(board, cell.counter)
 			}
@@ -1571,30 +1562,14 @@ func (s *Spinner) Run(m Mines, v View) {
 					} else if cell.GetOpened() {
 						s.mines.field.autoMarkFlags(pos.X, pos.Y)
 					}
-					if s.mines.field.isWin() {
-						event = GameWinMessageEvent
-						fmt.Println("Game Win!!!")
-					}
-					if s.mines.field.isGameOver() {
-						event = GameOverMessageEvent
-						fmt.Println("Game Over!!!")
-					}
+					s.mines.field.isWin()
+					s.mines.field.isGameOver()
 					board.SetBoard(s.mines.field.GetFieldValues())
 				}
 			case MouseButtonRightReleasedEvent:
 				if s.mines.field.state == gamePlay {
-					s.mines.field.Mark(board.mousePressedAtButton)
+					s.mines.field.MarkFlag(board.mousePressedAtButton)
 					board.SetBoard(s.mines.field.GetFieldValues())
-				}
-			case GameWinMessageEvent:
-				fmt.Println("accepted")
-				if s.mines.field.state == gameWin {
-					fmt.Println("Game Win!!!")
-				}
-			case GameOverMessageEvent:
-				fmt.Println("accepted")
-				if s.mines.field.state == gameOver {
-					fmt.Println("Game Over!!!")
 				}
 				// board
 			case IncRowEvent: // Replace game board size by arrows
