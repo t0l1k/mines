@@ -84,6 +84,7 @@ type (
 		fontSize int
 		text     string
 		color    sdl.Color
+		surface  *sdl.Surface
 	}
 	// Кнопка умеет откликься на нажатия и отжатия левой и правой кнопки
 	Button struct {
@@ -238,13 +239,12 @@ func (t *Label) GetLabel() string {
 }
 
 func (t *Label) Render(renderer *sdl.Renderer) (err error) {
-	var textSurf *sdl.Surface
 	var texture *sdl.Texture
-	if textSurf, err = t.font.RenderUTF8Blended(t.text, t.color); err != nil {
+	if t.surface, err = t.font.RenderUTF8Blended(t.text, t.color); err != nil {
 		return err
 	}
-	defer textSurf.Free()
-	if texture, err = renderer.CreateTextureFromSurface(textSurf); err != nil {
+	defer t.surface.Free()
+	if texture, err = renderer.CreateTextureFromSurface(t.surface); err != nil {
 		return err
 	}
 	_, _, width, height, _ := texture.Query()
@@ -833,6 +833,18 @@ func (s *GameBoard) SetBoard(board []int32) {
 				s.btnInstances[idx].(*Button).SetLabel("?")
 				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
 				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
+			case saved:
+				s.btnInstances[idx].(*Button).SetLabel("V")
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
+			case blown:
+				s.btnInstances[idx].(*Button).SetLabel("b")
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
+			case wrongMines:
+				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
+				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
+				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
 			}
 		}
 	}
@@ -1132,6 +1144,7 @@ func (s *Field) Open(x, y int32) {
 	}
 	if cell.GetFlagged() || cell.GetOpened() {
 		fmt.Printf("Opened or Flagged Field x:%v,y:%v,cell:%v", x, y, cell)
+		// s.autoMarkFlags(x,y)
 		return
 	}
 	cell.Open()
@@ -1151,6 +1164,39 @@ func (s *Field) Open(x, y int32) {
 	}
 }
 
+func (s *Field) autoMarkFlags(x, y int32) {
+	var countFlags, countClosed, countOpened int32
+	_, cell, err := s.getIdxOfCell(x, y)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("begin auto mark")
+	if cell.GetOpened() {
+		neighbours := s.getNeighbours(x, y)
+		for _, cell := range neighbours {
+			if cell.GetFlagged() {
+				countFlags++
+			} else if cell.GetClosed() {
+				countClosed++
+			} else if cell.GetOpened() {
+				countOpened++
+			}
+		}
+	}
+	fmt.Printf("Get Closed:%v Opened:%v Flagged:%v\n\n", countClosed, countOpened, countFlags)
+	if countClosed+countFlags == cell.GetNumber() {
+		for _, nCell := range s.getNeighbours(x, y) {
+			if nCell.GetClosed() {
+				nCell.SetFlagged()
+			}
+		}
+	} else if countFlags == cell.GetNumber() {
+		for _, nCell := range s.getNeighbours(x, y) {
+			s.Open(nCell.pos.X, nCell.pos.Y)
+		}
+	}
+}
+
 func (s *Field) Mark(idx int32) {
 	pos, cell := s.getPosOfCell(idx)
 	if s.isFieldEdge(pos.X, pos.Y) {
@@ -1159,14 +1205,58 @@ func (s *Field) Mark(idx int32) {
 	cell.Mark()
 }
 
+func (s *Field) isWin() bool {
+	var count int32
+	for _, cell := range s.field {
+		if cell.GetOpened() {
+			count++
+		}
+	}
+	if count+s.boardSize.mines == s.boardSize.row*s.boardSize.column {
+		for _, cell := range s.field {
+			if cell.GetMines() {
+				cell.SetSavedMines()
+			}
+		}
+		fmt.Println("Game Winned", s)
+		s.state = gameWin
+		return true
+	}
+	return false
+}
+
+func (s *Field) isGameOver() bool {
+	if s.state == gameOver {
+		for idx, cell := range s.field {
+			if cell.GetMines() {
+				s.field[idx].Open()
+				if cell.GetFlagged() {
+					s.field[idx].SetSavedMines()
+				} else {
+					s.field[idx].SetBlownMines()
+				}
+			}
+		}
+	} else {
+		return false
+	}
+	fmt.Println("Game Over", s)
+	return true
+}
+
 func (s *Field) GetFieldValues() (board []int32) {
 	for _, cell := range s.field {
 		if cell.state == closed || cell.state == flagged || cell.state == questionable {
 			board = append(board, cell.state)
+			// fmt.Println("cell state", cell.state, cell)
 		} else if cell.state >= opened {
 			if cell.GetFirstMines() {
 				board = append(board, firstMined)
 			} else if cell.GetMined() {
+				board = append(board, mined)
+			} else if cell.GetSavedMines() {
+				board = append(board, mined)
+			} else if cell.GetBlownMines() {
 				board = append(board, mined)
 			} else {
 				board = append(board, cell.counter)
@@ -1348,18 +1438,28 @@ func (s *Spinner) Run(m Mines, v View) {
 			case MouseButtonLeftReleasedEvent:
 				if firstMove {
 					s.mines.field.Setup(board.mousePressedAtButton)
-					pos, _ := s.mines.field.getPosOfCell(board.mousePressedAtButton)
-					s.mines.field.Open(pos.X, pos.Y)
+					pos, cell := s.mines.field.getPosOfCell(board.mousePressedAtButton)
+					if cell.GetClosed() {
+						s.mines.field.Open(pos.X, pos.Y)
+					}
 					board.SetBoard(s.mines.field.GetFieldValues())
 					firstMove = false
-				} else {
-					pos, _ := s.mines.field.getPosOfCell(board.mousePressedAtButton)
-					s.mines.field.Open(pos.X, pos.Y)
+				} else if s.mines.field.state == gamePlay {
+					pos, cell := s.mines.field.getPosOfCell(board.mousePressedAtButton)
+					if cell.GetClosed() {
+						s.mines.field.Open(pos.X, pos.Y)
+					} else if cell.GetOpened() {
+						s.mines.field.autoMarkFlags(pos.X, pos.Y)
+					}
+					s.mines.field.isWin()
+					s.mines.field.isGameOver()
 					board.SetBoard(s.mines.field.GetFieldValues())
 				}
 			case MouseButtonRightReleasedEvent:
-				s.mines.field.Mark(board.mousePressedAtButton)
-				board.SetBoard(s.mines.field.GetFieldValues())
+				if s.mines.field.state == gamePlay {
+					s.mines.field.Mark(board.mousePressedAtButton)
+					board.SetBoard(s.mines.field.GetFieldValues())
+				}
 				// board
 			case IncRowEvent: // Replace game board size by arrows
 				statusLine.gameBoardSize.row = int32(statusLine.btnInstances[4].(*Arrow).GetNumber())
