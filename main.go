@@ -1262,7 +1262,7 @@ func (s *Field) getIdxOfCell(x, y int32) (idx int32, cell *Cell) {
 	return -1, nil
 }
 func (s *Field) getPosOfCell(idx int32) (pos sdl.Point, cell *Cell) {
-	pos.X, pos.Y = idx%s.boardSize.row, idx/s.boardSize.column
+	pos.X, pos.Y = idx%s.boardSize.row, idx/s.boardSize.row
 	cell = &s.field[idx]
 	return pos, cell
 }
