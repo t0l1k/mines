@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -46,6 +47,7 @@ type (
 		renderer               *sdl.Renderer
 		event                  sdl.Event
 		pushTime, lastPushTime uint32
+		flags                  uint32
 	}
 	// Наблюдатель строка меню
 	StatusLine struct {
@@ -62,6 +64,7 @@ type (
 		cellWidth, cellHeight int32
 		mousePressedAtButton  int32
 		messageBox            *MessageBox
+		start                 bool
 	}
 	// Кнопки строки статуса
 	buttonsType int
@@ -129,6 +132,8 @@ const (
 	NilEvent Event = iota
 	TickEvent
 	QuitEvent
+	WindowResized
+	FullScreenToggleEvent
 	NewGameEvent
 	PauseEvent
 	ResetGameEvent
@@ -268,7 +273,7 @@ func (t *Label) Render(renderer *sdl.Renderer) (err error) {
 	return nil
 }
 
-func (t *Label) Quit() {
+func (t *Label) Destroy() {
 	t.font.Close()
 }
 
@@ -318,6 +323,10 @@ func (t *Button) New(rect sdl.Rect, text string, fgColor, bgColor sdl.Color, fon
 	}
 	t.cursor = MouseCursor{}
 	return nil
+}
+
+func (t *Button) GetLabel() string {
+	return t.text
 }
 
 func (t *Button) SetLabel(text string) {
@@ -388,7 +397,7 @@ func (t *Button) Render(renderer *sdl.Renderer) (err error) {
 	return nil
 }
 
-func (t *Button) Quit() {
+func (t *Button) Destroy() {
 	t.font.Close()
 }
 
@@ -459,8 +468,10 @@ func (b *MessageBox) Event(event sdl.Event) (pressed bool) {
 	return pressed
 }
 
-func (b *MessageBox) Quit() (err error) {
-	return nil
+func (b *MessageBox) Destroy() {
+	b.titleLabel.Destroy()
+	b.messageLabel.Destroy()
+	b.okButton.Destroy()
 }
 
 /*
@@ -594,6 +605,17 @@ func (s *Arrow) Render(renderer *sdl.Renderer) (err error) {
 	return nil
 }
 
+func (s *Arrow) Destroy() {
+	for i := range s.btnInstances {
+		switch s.btnInstances[i].(type) {
+		case *Button:
+			s.btnInstances[i].(*Button).Destroy()
+		case *Label:
+			s.btnInstances[i].(*Label).Destroy()
+		}
+	}
+}
+
 /*
 .oPYo.   o           o                o      o
 8        8           8                8
@@ -609,6 +631,10 @@ func (s *StatusLine) New(b boardConfig) {
 	s.Setup()
 }
 func (s *StatusLine) Setup() (err error) {
+	if len(s.btnInstances) > 0 {
+		s.Destroy()
+		s.btnInstances = nil
+	}
 	s.buttons = []buttonsData{
 		{name: buttonQuit, rect: sdl.Rect{0, 0, StatusLineHeight, StatusLineHeight}, text: "<-", event: []Event{QuitEvent}},
 		{name: buttonPause, rect: sdl.Rect{StatusLineHeight, 0, StatusLineHeight * 3, StatusLineHeight}, text: "Pause", event: []Event{PauseEvent}},
@@ -692,6 +718,10 @@ func (s *StatusLine) Update(event Event) error {
 	case DecMinesEvent:
 		s.gameBoardSize.mines = int32(s.btnInstances[6].(*Arrow).GetNumber()[0])
 		s.gameBoardSize.minesPercent = s.gameBoardSize.mines * 100 / (s.gameBoardSize.row * s.gameBoardSize.column)
+	case WindowResized:
+		StatusLineHeight = WinHeight / 20
+		StatusLineFontSize = StatusLineHeight - 3
+		s.Setup()
 	}
 	for idx, button := range s.btnInstances {
 		switch button.(type) {
@@ -831,6 +861,20 @@ func (s *StatusLine) calc(name buttonsType, instance *Arrow, op string) {
 	s.btnInstances[6].(*Arrow).SetNumber(m)
 }
 
+func (s *StatusLine) Destroy() {
+	for _, button := range s.btnInstances {
+		switch button.(type) {
+		case *Button:
+			button.(*Button).Destroy()
+		case *Arrow:
+			button.(*Arrow).Destroy()
+		case *Label:
+			button.(*Label).Destroy()
+		}
+
+	}
+}
+
 /*
 .oPYo.                        .oPYo.                          8
 8    8                        8   `8                          8
@@ -841,23 +885,40 @@ func (s *StatusLine) calc(name buttonsType, instance *Arrow, op string) {
 :....8 :.....:..:..:..:.....::......::.....::.....:..:::::.....:
 :::::8 :::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 :::::..:::::::::::::::::::::::::::::::::::::::::::::::::::::::::*/
-func (s *GameBoard) New(b boardConfig) (err error) {
+func (s *GameBoard) New(b boardConfig, start bool) (err error) {
+	s.start = start
 	s.gameBoardSize = b
+	s.colors = []sdl.Color{sdl.Color{192, 192, 192, 255}, sdl.Color{0, 0, 255, 255}, sdl.Color{0, 128, 0, 255}, sdl.Color{255, 0, 0, 255}, sdl.Color{0, 0, 128, 255}, sdl.Color{128, 0, 0, 255}, sdl.Color{0, 128, 128, 255}, sdl.Color{0, 0, 0, 255}, sdl.Color{128, 128, 128, 255}}
 	s.Setup()
 	return nil
 }
 
 func (s *GameBoard) Setup() (err error) {
-	var x, y, w, h, dx, dy int32
-	s.colors = []sdl.Color{sdl.Color{192, 192, 192, 255}, sdl.Color{0, 0, 255, 255}, sdl.Color{0, 128, 0, 255}, sdl.Color{255, 0, 0, 255}, sdl.Color{0, 0, 128, 255}, sdl.Color{128, 0, 0, 255}, sdl.Color{0, 128, 128, 255}, sdl.Color{0, 0, 0, 255}, sdl.Color{128, 128, 128, 255}}
+	var (
+		x, y, w, h, dx, dy, idx int32
+		board                   []string
+	)
 	w, h = int32(float64(WinHeight)/1.1), int32(float64(WinHeight)/1.1)
 	x, y = (WinHeight-w)/2, (WinHeight-h)/2+StatusLineHeight/2
 	s.rect = sdl.Rect{x, y, w, h}
 	s.cellWidth, s.cellHeight = w/s.gameBoardSize.row, (h-StatusLineHeight*2)/s.gameBoardSize.column
 	cellFontSize := s.cellHeight - 3
 	if len(s.btnInstances) > 0 {
-		s.btnInstances = nil
+		fmt.Printf("clear: %v\n", s.btnInstances)
+		s.Destroy()
+		tail := len(s.btnInstances) - 1
+		for i := 0; i <= tail; i++ {
+			switch s.btnInstances[i].(type) {
+			case *Button:
+				board = append(board, s.btnInstances[i].(*Button).GetLabel())
+			}
+			s.btnInstances = append(s.btnInstances[:i], s.btnInstances[i+1:tail+1]...)
+			tail--
+			i--
+		}
+		fmt.Printf("clear: %v\n", s.btnInstances, board)
 	}
+
 	for dy = 0; dy < s.gameBoardSize.column; dy++ {
 		for dx = 0; dx < s.gameBoardSize.row; dx++ {
 			x = s.rect.X + dx*s.cellWidth
@@ -865,12 +926,19 @@ func (s *GameBoard) Setup() (err error) {
 			w = s.cellWidth
 			h = s.cellHeight
 			b := &Button{}
-			if err := b.New(sdl.Rect{x, y, w, h}, " ", s.colors[7], s.colors[8], cellFontSize); err != nil {
+			text := " "
+			if len(board) > 0 && !s.start {
+				fmt.Println("len:", len(board), idx)
+				text = board[idx]
+			}
+			if err := b.New(sdl.Rect{x, y, w, h}, text, s.colors[7], s.colors[8], cellFontSize); err != nil {
 				panic(err)
 			}
 			s.btnInstances = append(s.btnInstances, b)
+			idx++
 		}
 	}
+	board = nil
 
 	s.messageBox = &MessageBox{}
 	if err = s.messageBox.New(sdl.Rect{WinWidth/2 - 300/2, WinHeight/2 - 150/2, 300, 150}, "Message", "Test Message", s.colors[1], s.colors[8]); err != nil {
@@ -890,6 +958,7 @@ func (s *GameBoard) Setup() (err error) {
 		}
 		s.btnInstances = append(s.btnInstances, lbl)
 	}
+	s.start = false
 	return nil
 }
 
@@ -987,6 +1056,12 @@ func (s *GameBoard) SetBoard(board []int32) {
 }
 
 func (s *GameBoard) Update(event Event) error {
+	if event == WindowResized {
+		fmt.Println("resize gameBoard")
+		s.Setup()
+	} else if event == NewGameEvent {
+
+	}
 	for idx, button := range s.btnInstances {
 		switch button.(type) {
 		case *Button:
@@ -1045,6 +1120,19 @@ func (s *GameBoard) Event(event sdl.Event) (e Event, err error) {
 		}
 	}
 	return NilEvent, nil
+}
+
+func (s *GameBoard) Destroy() {
+	for _, button := range s.btnInstances {
+		switch button.(type) {
+		case *Button:
+			button.(*Button).Destroy()
+		case *Label:
+			button.(*Label).Destroy()
+		case *MessageBox:
+			button.(*MessageBox).Destroy()
+		}
+	}
 }
 
 /*
@@ -1462,7 +1550,7 @@ func (s *View) Setup() (err error) {
 	if err = sdl.Init(sdl.INIT_EVERYTHING); err != nil {
 		panic(err)
 	}
-	if s.window, err = sdl.CreateWindow("Mines", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WinWidth, WinHeight, sdl.WINDOW_SHOWN); err != nil {
+	if s.window, err = sdl.CreateWindow("Mines", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WinWidth, WinHeight, sdl.WINDOW_SHOWN|sdl.WINDOW_RESIZABLE); err != nil {
 		panic(err)
 	}
 	if s.renderer, err = sdl.CreateRenderer(s.window, -1, sdl.RENDERER_ACCELERATED); err != nil {
@@ -1471,6 +1559,7 @@ func (s *View) Setup() (err error) {
 	sdl.SetHint(sdl.HINT_RENDER_SCALE_QUALITY, "1")
 	s.pushTime = 100
 	s.lastPushTime = sdl.GetTicks()
+	s.flags = 0
 	return nil
 }
 
@@ -1489,11 +1578,23 @@ func (s *View) GetEvents(o []Observers) (events []Event) {
 		switch t := s.event.(type) {
 		case *sdl.QuitEvent:
 			events = append(events, QuitEvent)
+			log.Printf("SEND Quit")
 			return events
 		case *sdl.KeyboardEvent:
 			if t.Keysym.Sym == sdl.K_ESCAPE && t.State == sdl.RELEASED {
 				events = append(events, QuitEvent)
+				log.Printf("SEND Quit by escape")
 				return events
+			} else if t.Keysym.Sym == sdl.K_F11 && t.State == sdl.RELEASED {
+				events = append(events, FullScreenToggleEvent)
+				log.Printf("SEND window resize by F11")
+				return events
+			}
+		case *sdl.WindowEvent:
+			if t.Event == sdl.WINDOWEVENT_RESIZED {
+				WinWidth, WinHeight = t.Data1, t.Data2
+				events = append(events, WindowResized)
+				log.Printf("SEND Window Resized")
 			}
 		}
 		for _, subscriber := range o {
@@ -1525,7 +1626,7 @@ func (s *View) GetEvents(o []Observers) (events []Event) {
 :::::::8 :::::::::::::::::::::::::::::::::
 :::::::..:::::::::::::::::::::::::::::::::*/
 func (s *Spinner) Run(m Mines, v View) {
-	defaultSize := boardConfig{row: 5, column: 5, mines: 5, minesPercent: 20}
+	defaultSize := boardConfig{row: 5, column: 5, mines: 5}
 	rand.Seed(time.Now().UTC().UnixNano())
 	s.mines = m
 	s.mines.New(defaultSize)
@@ -1536,7 +1637,7 @@ func (s *Spinner) Run(m Mines, v View) {
 	statusLine.New(defaultSize)
 	s.mines.Attach(statusLine)
 	board := &GameBoard{}
-	board.New(defaultSize)
+	board.New(defaultSize, true)
 	s.mines.Attach(board)
 	dirty := true
 	running := true
@@ -1545,7 +1646,7 @@ func (s *Spinner) Run(m Mines, v View) {
 			switch event {
 			case NewGameEvent:
 				s.mines.field.New(statusLine.gameBoardSize)
-				board.New(statusLine.gameBoardSize)
+				board.New(statusLine.gameBoardSize, true)
 				s.mines.field.state = gameStart
 			case MouseButtonLeftReleasedEvent:
 				if s.mines.field.state == gameStart {
@@ -1584,6 +1685,17 @@ func (s *Spinner) Run(m Mines, v View) {
 				statusLine.gameBoardSize.mines = int32(statusLine.btnInstances[6].(*Arrow).GetNumber()[0])
 			case DecMinesEvent:
 				statusLine.gameBoardSize.mines = int32(statusLine.btnInstances[6].(*Arrow).GetNumber()[0])
+			case FullScreenToggleEvent:
+				if v.flags == 0 {
+					v.flags = sdl.WINDOW_FULLSCREEN_DESKTOP
+				} else {
+					v.flags = 0
+				}
+				v.window.SetFullscreen(v.flags)
+				v.window.SetSize(WinWidth, WinHeight)
+				log.Printf("GOT screen toggle")
+			case WindowResized:
+				log.Printf("GOT Resized")
 			case QuitEvent:
 				running = false
 			case TickEvent:
