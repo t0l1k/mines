@@ -1154,6 +1154,10 @@ func (s *Cell) New(pos sdl.Point) (err error) {
 	return nil
 }
 
+func (s *Cell) Reset() {
+	s.state = closed
+}
+
 func (s *Cell) GetState() int32 {
 	return s.state
 }
@@ -1354,7 +1358,12 @@ func (s *Field) getPosOfCell(idx int32) (pos sdl.Point, cell *Cell) {
 	cell = &s.field[idx]
 	return pos, cell
 }
-
+func (s *Field) Reset() {
+	for idx, _ := range s.field {
+		s.field[idx].Reset()
+	}
+	s.state = gamePlay
+}
 func (s *Field) Open(x, y int32) {
 	if s.isFieldEdge(x, y) {
 		return
@@ -1648,6 +1657,9 @@ func (s *Spinner) Run(m Mines, v View) {
 				s.mines.field.New(statusLine.gameBoardSize)
 				board.New(statusLine.gameBoardSize, true)
 				s.mines.field.state = gameStart
+			case ResetGameEvent:
+				s.mines.field.Reset()
+				board.New(statusLine.gameBoardSize, true)
 			case MouseButtonLeftReleasedEvent:
 				if s.mines.field.state == gameStart {
 					s.mines.field.Setup(board.mousePressedAtButton)
