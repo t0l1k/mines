@@ -15,10 +15,10 @@ import (
 type (
 	// Интерфейс наблюдателей
 	Observers interface {
-		Setup() error
-		Update(Event) error
-		Render(*sdl.Renderer) error
-		Event(sdl.Event) (Event, error)
+		Setup()
+		Update(Event)
+		Render(*sdl.Renderer)
+		Event(sdl.Event) Event
 	}
 	// Модель
 	Mines struct {
@@ -58,6 +58,7 @@ type (
 	// Наблюдатель поле игры
 	GameBoard struct {
 		rect                  sdl.Rect
+		relativePos           sdl.Point
 		btnInstances          []interface{}
 		colors                []sdl.Color
 		gameBoardSize         boardConfig
@@ -83,31 +84,32 @@ type (
 	// UI для sdl2
 	// Метка умеет выводить текст
 	Label struct {
-		pos      sdl.Point
+		rect     sdl.Rect
 		font     *ttf.Font
 		fontSize int
 		text     string
-		color    sdl.Color
-		surface  *sdl.Surface
+		fg       sdl.Color
 	}
 	// Кнопка умеет откликься на нажатия и отжатия левой и правой кнопки
 	Button struct {
-		rect             sdl.Rect
-		font             *ttf.Font
-		fontSize         int32
-		text             string
-		fgColor, bgColor sdl.Color
-		focus, hide      bool
-		cursor           MouseCursor
+		rect                    sdl.Rect
+		relativePos             sdl.Point
+		text                    string
+		fg, bg                  sdl.Color
+		label                   *Label
+		focus, visible, pressed bool
+		mouse                   *MouseCursor
 	}
 	// Стрелки умеет отпралять события нажатия и уже другие наблюдатели на эти события реагируют
 	Arrow struct {
-		rect             sdl.Rect
-		text             string
-		fgColor, bgColor sdl.Color
-		buttons          []buttonsData
-		btnInstances     []interface{}
-		count            int
+		rect                          sdl.Rect
+		text                          string
+		fgColor, bgColor              sdl.Color
+		buttons                       []buttonsData
+		btnInstances                  []interface{}
+		count                         int
+		pushTime, lastPushTime, delay uint32
+		repeat                        bool
 	}
 	// Указатель мыши нужен для обработки нажатий кнопки
 	MouseCursor struct {
@@ -129,7 +131,7 @@ type (
 
 // Перечень событий
 const (
-	NilEvent Event = iota
+	NilEvent Event = iota + 100
 	TickEvent
 	QuitEvent
 	WindowResized
@@ -153,7 +155,7 @@ const (
 
 // перечень кнопок строки статуса
 const (
-	buttonQuit buttonsType = iota
+	buttonQuit buttonsType = iota + 200
 	buttonPause
 	buttonReset
 	buttonNew
@@ -168,7 +170,7 @@ const (
 
 // события от кнопок мышки
 const (
-	MouseButtonLeftPressed int = iota
+	MouseButtonLeftPressed int = iota + 300
 	MouseButtonLeftReleased
 	MouseButtonRightPressed
 	MouseButtonRightReleased
@@ -176,7 +178,7 @@ const (
 
 // состояния ячеек минного поля
 const (
-	closed int32 = (iota + 10)
+	closed int32 = iota + 400
 	flagged
 	questionable
 	opened
@@ -194,7 +196,7 @@ const (
 
 // состояния игры
 const (
-	gameStart minesStateType = iota
+	gameStart minesStateType = iota + 500
 	gamePlay
 	gamePause
 	gameWin
@@ -214,13 +216,12 @@ const (
 var (
 	mn                   int32 = 2
 	WinWidth, WinHeight  int32 = 320 * mn, 180 * mn
-	row, column, mines   int   = 8, 8, 10
-	FontName                   = "data/Roboto-Regular.ttf"
+	row, column, mines   int32 = 8, 8, 10
 	Background                 = sdl.Color{0, 129, 110, 255}
 	Foreground                 = sdl.Color{223, 225, 81, 255}
 	BackgroundStatusLine       = sdl.Color{0, 64, 32, 255}
 	ForegroundStatusLine       = sdl.Color{255, 0, 64, 255}
-	StatusLineFontSize   int32 = StatusLineHeight - 3
+	StatusLineFontSize   int   = int(StatusLineHeight) - 3
 	StatusLineHeight     int32 = WinHeight / 20
 )
 
@@ -235,42 +236,58 @@ o            8             8
 :::::::::::::::::::::::::::::
 :::::::::::::::::::::::::::::*/
 
-func (t *Label) New(pos sdl.Point, text string, color sdl.Color, fontSize int32) (err error) {
-	t.pos = pos
-	t.fontSize = int(fontSize)
-	t.text = text
-	t.color = color
-	err = ttf.Init()
-	if err != nil {
+func (s *Label) Setup(pos sdl.Point, text string, fontSize int, fg sdl.Color) {
+	s.rect = sdl.Rect{pos.X, pos.Y, 1, 1}
+	s.fontSize = fontSize
+	s.text = text
+	s.fg = fg
+	var err error
+	fontName := "data/Roboto-Regular.ttf"
+	if s.font, err = ttf.OpenFont(fontName, s.fontSize); err != nil {
 		panic(err)
 	}
-	if t.font, err = ttf.OpenFont(FontName, t.fontSize); err != nil {
+}
+
+func (s *Label) GetLabel() string {
+	return s.text
+}
+
+func (s *Label) SetLabel(text string) {
+	s.text = text
+}
+
+func (s *Label) SetFg(fg sdl.Color) {
+	s.fg = fg
+}
+
+func (s *Label) GetPos() (int32, int32) {
+	return s.rect.X, s.rect.Y
+}
+
+func (s *Label) SetPos(value sdl.Point) {
+	s.rect.X, s.rect.Y = value.X, value.Y
+}
+
+func (s *Label) GetSize() (int32, int32) {
+	return s.rect.W, s.rect.H
+}
+
+func (s *Label) Render(renderer *sdl.Renderer) {
+	var (
+		err     error
+		surface *sdl.Surface
+		texture *sdl.Texture
+	)
+	if surface, err = s.font.RenderUTF8Blended(s.text, s.fg); err != nil {
 		panic(err)
 	}
-	return nil
-}
-
-func (t *Label) SetLabel(text string) {
-	t.text = text
-}
-
-func (t *Label) GetLabel() string {
-	return t.text
-}
-
-func (t *Label) Render(renderer *sdl.Renderer) (err error) {
-	var texture *sdl.Texture
-	if t.surface, err = t.font.RenderUTF8Blended(t.text, t.color); err != nil {
-		return err
+	defer surface.Free()
+	if texture, err = renderer.CreateTextureFromSurface(surface); err != nil {
+		panic(err)
 	}
-	defer t.surface.Free()
-	if texture, err = renderer.CreateTextureFromSurface(t.surface); err != nil {
-		return err
-	}
-	_, _, width, height, _ := texture.Query()
+	_, _, s.rect.W, s.rect.H, _ = texture.Query()
 	defer texture.Destroy()
-	renderer.Copy(texture, nil, &sdl.Rect{t.pos.X, t.pos.Y, width, height})
-	return nil
+	renderer.Copy(texture, nil, &s.rect)
 }
 
 func (t *Label) Destroy() {
@@ -287,13 +304,13 @@ o     o                             .oPYo.
 ..::::..:.....::.....::.....::.....::.....::.....:..:::::.....::.....:..::::
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::*/
-func (m *MouseCursor) Update() (int32, int32, uint32) {
-	m.X, m.Y, m.button = sdl.GetMouseState()
-	return m.X, m.Y, m.button
+func (s *MouseCursor) Update() (int32, int32, uint32) {
+	s.X, s.Y, s.button = sdl.GetMouseState()
+	return s.X, s.Y, s.button
 }
 
-func (m MouseCursor) String() string {
-	return fmt.Sprintf("Mouse x:%v y:%v button:%v", m.X, m.Y, m.button)
+func (s MouseCursor) String() string {
+	return fmt.Sprintf("Mouse x:%v y:%v button:%v", s.X, s.Y, s.button)
 }
 
 /*
@@ -306,99 +323,115 @@ o8YooP' o    o  o8P  o8P .oPYo. odYo.
 :......::.....:::..:::..::.....:..::..
 ::::::::::::::::::::::::::::::::::::::
 ::::::::::::::::::::::::::::::::::::::*/
-func (t *Button) New(rect sdl.Rect, text string, fgColor, bgColor sdl.Color, fontSize int32) (err error) {
-	t.rect = rect
-	t.fontSize = fontSize
-	t.text = text
-	t.fgColor = fgColor
-	t.bgColor = bgColor
-	t.focus = false
-	t.hide = false
-	err = ttf.Init()
-	if err != nil {
-		panic(err)
-	}
-	if t.font, err = ttf.OpenFont(FontName, int(t.fontSize)); err != nil {
-		panic(err)
-	}
-	t.cursor = MouseCursor{}
-	return nil
+func (s *Button) Setup(rect sdl.Rect, relativePos sdl.Point, text string, fontSize int, fg, bg sdl.Color) {
+	s.rect = rect
+	s.relativePos = relativePos
+	s.text = text
+	s.fg = fg
+	s.bg = bg
+	s.focus = false
+	s.visible = true
+	s.pressed = false
+	s.label = &Label{}
+	s.label.Setup(sdl.Point{s.rect.X, s.rect.Y}, s.text, fontSize, s.fg)
+	s.mouse = &MouseCursor{}
 }
 
-func (t *Button) GetLabel() string {
-	return t.text
+func (s *Button) GetLabel() string {
+	return s.text
 }
 
-func (t *Button) SetLabel(text string) {
-	t.text = text
+func (s *Button) SetLabel(text string) {
+	s.label.SetLabel(text)
 }
 
-func (t *Button) SetBackground(color sdl.Color) {
-	t.bgColor = color
+func (s *Button) SetBackground(color sdl.Color) {
+	s.bg = color
 }
 
-func (t *Button) SetForeground(color sdl.Color) {
-	t.fgColor = color
+func (s *Button) SetForeground(color sdl.Color) {
+	s.fg = color
 }
 
-func (b *Button) Event(event sdl.Event) int {
+func (s *Button) GetFocus() bool {
+	return s.focus
+}
+
+func (s *Button) GetVisible() bool {
+	return s.visible
+}
+
+func (s *Button) SetVisible(value bool) {
+	s.visible = value
+}
+
+func (s *Button) GetRect() *sdl.Rect {
+	return &sdl.Rect{s.rect.X + s.relativePos.X, s.rect.Y + s.relativePos.Y, s.rect.W, s.rect.H}
+}
+
+func (s *Button) IsPressed() bool {
+	return s.pressed
+}
+
+func (s *Button) IsReleased() bool {
+	return !s.pressed && s.mouse.InRect(s.GetRect())
+}
+
+func (s *Button) Event(event sdl.Event) int {
+	s.mouse.Update()
 	switch t := event.(type) {
 	case *sdl.MouseButtonEvent:
-		if b.focus && t.Button == sdl.BUTTON_LEFT && t.State == 1 {
+		if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_LEFT && t.State == 1 {
+			s.pressed = true
+			log.Printf("Button: SEND left mouse button pressed:%v\n", s.text)
 			return MouseButtonLeftPressed
-		} else if b.focus && t.Button == sdl.BUTTON_LEFT && t.State == 0 {
+		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_LEFT && t.State == 0 {
+			s.pressed = false
+			log.Printf("Button: SEND left mouse button released:%v\n", s.text)
 			return MouseButtonLeftReleased
-		} else if b.focus && t.Button == sdl.BUTTON_RIGHT && t.State == 1 {
+		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_RIGHT && t.State == 1 {
+			s.pressed = true
+			log.Printf("Button: SEND right mouse button pressed:%v\n", s.text)
 			return MouseButtonRightPressed
-		} else if b.focus && t.Button == sdl.BUTTON_RIGHT && t.State == 0 {
+		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_RIGHT && t.State == 0 {
+			s.pressed = false
+			log.Printf("Button: SEND right mouse button released:%v\n", s.text)
 			return MouseButtonRightReleased
 		}
 	}
 	return -1
 }
 
-func (t *Button) Update() {
-	t.cursor.Update()
-	if t.cursor.InRect(&t.rect) {
-		t.focus = true
+func (s *Button) Update() {
+	s.mouse.Update()
+	if s.mouse.InRect(s.GetRect()) {
+		s.focus = true
 	} else {
-		t.focus = false
+		s.focus = false
 	}
 }
 
-func (t *Button) paint(renderer *sdl.Renderer, fg, bg sdl.Color) (err error) {
-	var textSurf *sdl.Surface
-	var texture *sdl.Texture
-	if textSurf, err = t.font.RenderUTF8Blended(t.text, fg); err != nil {
-		return err
-	}
-	defer textSurf.Free()
-	if texture, err = renderer.CreateTextureFromSurface(textSurf); err != nil {
-		return err
-	}
-	_, _, width, height, _ := texture.Query()
-	defer texture.Destroy()
-	x := (t.rect.W-width)/2 + t.rect.X
-	y := (t.rect.H-height)/2 + t.rect.Y
+func (s *Button) paint(renderer *sdl.Renderer, fg, bg sdl.Color) {
 	renderer.SetDrawColor(bg.R, bg.G, bg.B, bg.A)
-	renderer.FillRect(&sdl.Rect{t.rect.X, t.rect.Y, t.rect.W, t.rect.H})
+	renderer.FillRect(s.GetRect())
 	renderer.SetDrawColor(fg.R, fg.G, fg.B, fg.A)
-	renderer.DrawRect(&sdl.Rect{t.rect.X, t.rect.Y, t.rect.W, t.rect.H})
-	renderer.Copy(texture, nil, &sdl.Rect{x, y, width, height})
-	return nil
+	renderer.DrawRect(s.GetRect())
+	w, h := s.label.GetSize()
+	s.label.SetPos(sdl.Point{s.rect.X + s.relativePos.X + (s.rect.W-w)/2, s.rect.Y + s.relativePos.Y + (s.rect.H-h)/2})
+	s.label.SetFg(fg)
+	s.label.Render(renderer)
 }
 
-func (t *Button) Render(renderer *sdl.Renderer) (err error) {
-	if !t.focus {
-		t.paint(renderer, t.fgColor, t.bgColor)
+func (s *Button) Render(renderer *sdl.Renderer) {
+	if !s.focus {
+		s.paint(renderer, s.fg, s.bg)
 	} else {
-		t.paint(renderer, t.bgColor, t.fgColor)
+		s.paint(renderer, s.bg, s.fg)
 	}
-	return nil
 }
 
-func (t *Button) Destroy() {
-	t.font.Close()
+func (s *Button) Destroy() {
+	s.label.Destroy()
 }
 
 /*
@@ -414,26 +447,17 @@ o     o                                            .oPYo.
 ::::::::::::::::::::::::::::::::::::::...:::::::::::::::::::::::::::::::
 */
 
-func (b *MessageBox) New(rect sdl.Rect, title, message string, fg, bg sdl.Color) (err error) {
-	b.rect = rect
-	b.title = title
-	b.message = message
-	b.fg = fg
-	b.bg = bg
-	err = b.titleLabel.New(sdl.Point{b.rect.X + 5, b.rect.Y + 3}, b.title, b.fg, 10)
-	if err != nil {
-		panic(err)
-	}
-	err = b.messageLabel.New(sdl.Point{b.rect.X + 30, b.rect.Y + 50}, b.message, b.fg, 30)
-	if err != nil {
-		panic(err)
-	}
-	err = b.okButton.New(sdl.Rect{b.rect.X + (b.rect.W-100)/2, b.rect.Y + b.rect.H - 25, 100, 20}, "Ok", b.fg, b.bg, 20)
-	if err != nil {
-		panic(err)
-	}
-	b.Hide = false
-	return nil
+func (s *MessageBox) Setup(rect sdl.Rect, title, message string, fg, bg sdl.Color) {
+	s.rect = rect
+	s.title = title
+	s.message = message
+	s.fg = fg
+	s.bg = bg
+	s.titleLabel.Setup(sdl.Point{s.rect.X + 5, s.rect.Y + 3}, s.title, 10, s.fg)
+	s.messageLabel.Setup(sdl.Point{s.rect.X + 30, s.rect.Y + 50}, s.message, 30, s.fg)
+	s.okButton.Setup(sdl.Rect{(s.rect.W - 100) / 2, s.rect.H - 25, 100, 20}, sdl.Point{s.rect.X, s.rect.Y}, "Ok", 20, s.fg, s.bg)
+	s.Hide = false
+
 }
 
 func (b *MessageBox) Update() (err error) {
@@ -450,7 +474,7 @@ func (b *MessageBox) Render(renderer *sdl.Renderer) (err error) {
 	renderer.FillRect(&b.rect)
 	renderer.SetDrawColor(b.fg.R, b.fg.G, b.fg.B, b.fg.A)
 	renderer.DrawRect(&sdl.Rect{b.rect.X, b.rect.Y, b.rect.W, 20})
-	renderer.DrawRect(&sdl.Rect{b.rect.X, b.rect.Y, b.rect.W, b.rect.H})
+	renderer.DrawRect(&b.rect)
 	b.titleLabel.Render(renderer)
 	b.messageLabel.Render(renderer)
 	b.okButton.Render(renderer)
@@ -484,8 +508,9 @@ func (b *MessageBox) Destroy() {
 ..:::::....::::..:::::.....:::..::..:::.....:
 :::::::::::::::::::::::::::::::::::::::::::::
 :::::::::::::::::::::::::::::::::::::::::::::*/
-func (t *Arrow) New(rect sdl.Rect, text string, fgColor, bgColor sdl.Color, fontSize int32) (err error) {
-	t.rect = rect
+func (t *Arrow) New(rect sdl.Rect, text string, fgColor, bgColor sdl.Color, fontSize int) (err error) {
+	t.rect = sdl.Rect{0, 0, rect.W, rect.H}
+	relativePos := sdl.Point{rect.X, rect.Y}
 	t.text = text
 	t.fgColor = fgColor
 	t.bgColor = bgColor
@@ -497,24 +522,19 @@ func (t *Arrow) New(rect sdl.Rect, text string, fgColor, bgColor sdl.Color, font
 		switch button.name {
 		case buttonDec:
 			btn := &Button{}
-			if err = btn.New(button.rect, button.text, t.bgColor, sdl.Color{0, 0, 0, 255}, fontSize); err != nil {
-				panic(err)
-			}
+			btn.Setup(button.rect, sdl.Point{relativePos.X, relativePos.Y}, button.text, fontSize, t.bgColor, sdl.Color{0, 0, 0, 255})
 			t.btnInstances = append(t.btnInstances, btn)
 		case buttonInc:
 			btn := &Button{}
-			if err = btn.New(button.rect, button.text, t.bgColor, sdl.Color{0, 0, 0, 255}, fontSize); err != nil {
-				panic(err)
-			}
+			btn.Setup(button.rect, sdl.Point{relativePos.X, relativePos.Y}, button.text, fontSize, t.bgColor, sdl.Color{0, 0, 0, 255})
 			t.btnInstances = append(t.btnInstances, btn)
 		case label:
 			lbl := &Label{}
-			if err = lbl.New(sdl.Point{button.rect.X, button.rect.Y}, button.text, t.fgColor, fontSize); err != nil {
-				panic(err)
-			}
+			lbl.Setup(sdl.Point{relativePos.X + button.rect.X, button.rect.Y}, button.text, fontSize, t.fgColor)
 			t.btnInstances = append(t.btnInstances, lbl)
 		}
 	}
+	t.delay = 250
 	return nil
 }
 
@@ -558,26 +578,29 @@ func (s *Arrow) SetNumber(value []int) {
 	s.SetLabel(text)
 }
 
-func (s *Arrow) Event(event sdl.Event) (e Event, err error) {
+func (s *Arrow) Event(event sdl.Event) (e Event) {
 	for idx, button := range s.btnInstances {
 		switch event.(type) {
 		case *sdl.MouseButtonEvent:
 			switch button.(type) {
 			case *Button:
-				if ok := button.(*Button).Event(event); ok == MouseButtonLeftReleased {
+				ok := button.(*Button).Event(event)
+				if ok == MouseButtonLeftReleased {
 					for i := 0; i < len(s.buttons[idx].event); i++ {
 						switch s.buttons[idx].event[i] {
 						case DecButtonEvent:
-							return DecButtonEvent, nil
+							log.Println("released dec", s.lastPushTime, s.delay, sdl.GetTicks(), s.lastPushTime+s.delay, ok)
+							return DecButtonEvent
 						case IncButtonEvent:
-							return IncButtonEvent, nil
+							log.Println("released inc", s.lastPushTime, s.delay, sdl.GetTicks(), s.lastPushTime+s.delay, ok)
+							return IncButtonEvent
 						}
 					}
 				}
 			}
 		}
 	}
-	return NilEvent, nil
+	return NilEvent
 }
 
 func (s *Arrow) Update(event Event) {
@@ -589,20 +612,15 @@ func (s *Arrow) Update(event Event) {
 	}
 }
 
-func (s *Arrow) Render(renderer *sdl.Renderer) (err error) {
+func (s *Arrow) Render(renderer *sdl.Renderer) {
 	for _, button := range s.btnInstances {
 		switch button.(type) {
 		case *Button:
-			if err = button.(*Button).Render(renderer); err != nil {
-				panic(err)
-			}
+			button.(*Button).Render(renderer)
 		case *Label:
-			if err = button.(*Label).Render(renderer); err != nil {
-				panic(err)
-			}
+			button.(*Label).Render(renderer)
 		}
 	}
-	return nil
 }
 
 func (s *Arrow) Destroy() {
@@ -630,7 +648,7 @@ func (s *StatusLine) New(b boardConfig) {
 	s.gameBoardSize = b
 	s.Setup()
 }
-func (s *StatusLine) Setup() (err error) {
+func (s *StatusLine) Setup() {
 	if len(s.btnInstances) > 0 {
 		s.Destroy()
 		s.btnInstances = nil
@@ -647,59 +665,44 @@ func (s *StatusLine) Setup() (err error) {
 		switch button.name {
 		case buttonQuit:
 			btn := &Button{}
-			if err = btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize); err != nil {
-				panic(err)
-			}
+			btn.Setup(button.rect, sdl.Point{0, 0}, button.text, StatusLineFontSize, BackgroundStatusLine, ForegroundStatusLine)
 			s.btnInstances = append(s.btnInstances, btn)
 		case buttonPause:
 			btn := &Button{}
-			if err = btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize); err != nil {
-				panic(err)
-			}
+			btn.Setup(button.rect, sdl.Point{0, 0}, button.text, StatusLineFontSize, BackgroundStatusLine, ForegroundStatusLine)
 			s.btnInstances = append(s.btnInstances, btn)
 		case buttonReset:
 			btn := &Button{}
-			if err = btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize); err != nil {
-				panic(err)
-			}
+			btn.Setup(button.rect, sdl.Point{0, 0}, button.text, StatusLineFontSize, BackgroundStatusLine, ForegroundStatusLine)
 			s.btnInstances = append(s.btnInstances, btn)
 		case buttonNew:
 			btn := &Button{}
-			if err = btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize); err != nil {
-				panic(err)
-			}
+			btn.Setup(button.rect, sdl.Point{0, 0}, button.text, StatusLineFontSize, BackgroundStatusLine, ForegroundStatusLine)
 			s.btnInstances = append(s.btnInstances, btn)
 		case buttonRow:
 			btn := &Arrow{}
-			if err = btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize); err != nil {
-				panic(err)
-			}
+			btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize)
 			s.btnInstances = append(s.btnInstances, btn)
 		case buttonCol:
 			btn := &Arrow{}
-			if err = btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize); err != nil {
-				panic(err)
-			}
+			btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize)
 			s.btnInstances = append(s.btnInstances, btn)
 		case buttonMines:
 			btn := &Arrow{}
-			if err = btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize); err != nil {
-				panic(err)
-			}
+			btn.New(button.rect, button.text, BackgroundStatusLine, ForegroundStatusLine, StatusLineFontSize)
 			s.btnInstances = append(s.btnInstances, btn)
 		}
 	}
-	return nil
 }
 
 func (s *StatusLine) GetGameBoardSize() boardConfig {
 	return s.gameBoardSize
 }
 
-func (s *StatusLine) Update(event Event) error {
+func (s *StatusLine) Update(event Event) {
 	switch event {
 	case NewGameEvent:
-		fmt.Printf("start new game:%v", s.gameBoardSize)
+		log.Printf("start new game:%v", s.gameBoardSize)
 	case IncRowEvent: // Replace game board size by arrows
 		s.gameBoardSize.row = int32(s.btnInstances[4].(*Arrow).GetNumber()[0])
 		s.gameBoardSize.minesPercent = s.gameBoardSize.mines * 100 / (s.gameBoardSize.row * s.gameBoardSize.column)
@@ -720,7 +723,7 @@ func (s *StatusLine) Update(event Event) error {
 		s.gameBoardSize.minesPercent = s.gameBoardSize.mines * 100 / (s.gameBoardSize.row * s.gameBoardSize.column)
 	case WindowResized:
 		StatusLineHeight = WinHeight / 20
-		StatusLineFontSize = StatusLineHeight - 3
+		StatusLineFontSize = int(StatusLineHeight) - 3
 		s.Setup()
 	}
 	for idx, button := range s.btnInstances {
@@ -733,86 +736,82 @@ func (s *StatusLine) Update(event Event) error {
 			s.btnInstances[idx].(*Arrow).Update(event)
 		}
 	}
-	return nil
 }
 
-func (s *StatusLine) Render(renderer *sdl.Renderer) (err error) {
+func (s *StatusLine) Render(renderer *sdl.Renderer) {
 	for _, button := range s.btnInstances {
 		switch button.(type) {
 		case *Button:
-			if err = button.(*Button).Render(renderer); err != nil {
-				panic(err)
-			}
+			button.(*Button).Render(renderer)
 		case *Arrow:
-			if err = button.(*Arrow).Render(renderer); err != nil {
-				panic(err)
-			}
+			button.(*Arrow).Render(renderer)
 		}
 
 	}
-	return nil
 }
-func (s *StatusLine) Event(event sdl.Event) (e Event, err error) {
+
+func (s *StatusLine) Event(event sdl.Event) (e Event) {
 	for idx, button := range s.btnInstances {
 		switch event.(type) {
 		case *sdl.MouseButtonEvent:
 			switch button.(type) {
 			case *Button:
-				if ok := button.(*Button).Event(event); ok == MouseButtonLeftReleased {
+				b := button.(*Button).Event(event)
+				if ok := button.(*Button).IsReleased(); ok && b == MouseButtonLeftReleased {
 					for i := 0; i < len(s.buttons[idx].event); i++ {
 						switch s.buttons[idx].event[i] {
 						case QuitEvent:
-							fmt.Println("Get QuitEvent", s.buttons[idx].name)
-							return QuitEvent, nil
+							log.Println("Get QuitEvent", s.buttons[idx].name)
+							return QuitEvent
 						case PauseEvent:
-							fmt.Println("Get PauseEvent", s.buttons[idx].name)
-							return PauseEvent, nil
+							log.Println("Get PauseEvent", s.buttons[idx].name)
+							return PauseEvent
 						case ResetGameEvent:
-							fmt.Println("Get ResetEvent", s.buttons[idx].name)
-							return ResetGameEvent, nil
+							log.Println("Get ResetEvent", s.buttons[idx].name)
+							return ResetGameEvent
 						case NewGameEvent:
-							fmt.Println("Get NewEvent", s.buttons[idx].name)
-							return NewGameEvent, nil
+							log.Println("Get NewEvent", s.buttons[idx].name)
+							return NewGameEvent
 						}
 					}
 				}
 
 			case *Arrow:
-				if ev, _ := button.(*Arrow).Event(event); ev != NilEvent {
+				if ev := button.(*Arrow).Event(event); ev != NilEvent {
 					switch s.buttons[idx].name {
 					case buttonRow:
 						switch ev {
 						case IncButtonEvent:
 							s.calc(s.buttons[idx].name, s.btnInstances[idx].(*Arrow), "inc")
-							return IncRowEvent, nil
+							return IncRowEvent
 						case DecButtonEvent:
 							s.calc(s.buttons[idx].name, s.btnInstances[idx].(*Arrow), "dec")
-							return DecRowEvent, nil
+							return DecRowEvent
 						}
 					case buttonCol:
 						switch ev {
 						case IncButtonEvent:
 							s.calc(s.buttons[idx].name, s.btnInstances[idx].(*Arrow), "inc")
-							return IncColumnEvent, nil
+							return IncColumnEvent
 						case DecButtonEvent:
 							s.calc(s.buttons[idx].name, s.btnInstances[idx].(*Arrow), "dec")
-							return DecColumnEvent, nil
+							return DecColumnEvent
 						}
 					case buttonMines:
 						switch ev {
 						case IncButtonEvent:
 							s.calc(s.buttons[idx].name, s.btnInstances[idx].(*Arrow), "inc")
-							return IncMinesEvent, nil
+							return IncMinesEvent
 						case DecButtonEvent:
 							s.calc(s.buttons[idx].name, s.btnInstances[idx].(*Arrow), "dec")
-							return DecMinesEvent, nil
+							return DecMinesEvent
 						}
 					}
 				}
 			}
 		}
 	}
-	return NilEvent, nil
+	return NilEvent
 }
 
 func (s *StatusLine) calc(name buttonsType, instance *Arrow, op string) {
@@ -885,26 +884,25 @@ func (s *StatusLine) Destroy() {
 :....8 :.....:..:..:..:.....::......::.....::.....:..:::::.....:
 :::::8 :::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 :::::..:::::::::::::::::::::::::::::::::::::::::::::::::::::::::*/
-func (s *GameBoard) New(b boardConfig, start bool) (err error) {
+func (s *GameBoard) New(b boardConfig, start bool) {
 	s.start = start
 	s.gameBoardSize = b
 	s.colors = []sdl.Color{sdl.Color{192, 192, 192, 255}, sdl.Color{0, 0, 255, 255}, sdl.Color{0, 128, 0, 255}, sdl.Color{255, 0, 0, 255}, sdl.Color{0, 0, 128, 255}, sdl.Color{128, 0, 0, 255}, sdl.Color{0, 128, 128, 255}, sdl.Color{0, 0, 0, 255}, sdl.Color{128, 128, 128, 255}}
 	s.Setup()
-	return nil
 }
 
-func (s *GameBoard) Setup() (err error) {
+func (s *GameBoard) Setup() {
 	var (
 		x, y, w, h, dx, dy, idx int32
 		board                   []string
 	)
 	w, h = int32(float64(WinHeight)/1.1), int32(float64(WinHeight)/1.1)
 	x, y = (WinHeight-w)/2, (WinHeight-h)/2+StatusLineHeight/2
-	s.rect = sdl.Rect{x, y, w, h}
+	s.relativePos = sdl.Point{x, y}
+	s.rect = sdl.Rect{0, 0, w, h}
 	s.cellWidth, s.cellHeight = w/s.gameBoardSize.row, (h-StatusLineHeight*2)/s.gameBoardSize.column
-	cellFontSize := s.cellHeight - 3
+	cellFontSize := int(s.cellHeight) - 3
 	if len(s.btnInstances) > 0 {
-		fmt.Printf("clear: %v\n", s.btnInstances)
 		s.Destroy()
 		tail := len(s.btnInstances) - 1
 		for i := 0; i <= tail; i++ {
@@ -916,34 +914,26 @@ func (s *GameBoard) Setup() (err error) {
 			tail--
 			i--
 		}
-		fmt.Printf("clear: %v\n", s.btnInstances, board)
 	}
-
 	for dy = 0; dy < s.gameBoardSize.column; dy++ {
 		for dx = 0; dx < s.gameBoardSize.row; dx++ {
-			x = s.rect.X + dx*s.cellWidth
-			y = s.rect.Y + dy*s.cellHeight
+			x = dx * s.cellWidth
+			y = dy * s.cellHeight
 			w = s.cellWidth
 			h = s.cellHeight
 			b := &Button{}
 			text := " "
 			if len(board) > 0 && !s.start {
-				fmt.Println("len:", len(board), idx)
 				text = board[idx]
 			}
-			if err := b.New(sdl.Rect{x, y, w, h}, text, s.colors[7], s.colors[8], cellFontSize); err != nil {
-				panic(err)
-			}
+			b.Setup(sdl.Rect{x, y, w, h}, s.relativePos, text, cellFontSize, s.colors[7], s.colors[8])
 			s.btnInstances = append(s.btnInstances, b)
 			idx++
 		}
 	}
 	board = nil
-
 	s.messageBox = &MessageBox{}
-	if err = s.messageBox.New(sdl.Rect{WinWidth/2 - 300/2, WinHeight/2 - 150/2, 300, 150}, "Message", "Test Message", s.colors[1], s.colors[8]); err != nil {
-		panic(err)
-	}
+	s.messageBox.Setup(sdl.Rect{WinWidth/2 - 300/2, WinHeight/2 - 150/2, 300, 150}, "Message", "Test Message", s.colors[1], s.colors[8])
 	s.messageBox.Hide = true
 	s.btnInstances = append(s.btnInstances, s.messageBox)
 
@@ -953,18 +943,14 @@ func (s *GameBoard) Setup() (err error) {
 		x = s.rect.X + dx*w + w
 		y = s.rect.H - StatusLineHeight/2
 		lbl := &Label{}
-		if err = lbl.New(sdl.Point{x, y}, arr[dx], s.colors[1], StatusLineFontSize); err != nil {
-			panic(err)
-		}
+		lbl.Setup(sdl.Point{x, y}, arr[dx], StatusLineFontSize, s.colors[1])
 		s.btnInstances = append(s.btnInstances, lbl)
 	}
 	s.start = false
-	return nil
 }
 
 func (s *GameBoard) SetBoard(board []int32) {
 	for idx, button := range s.btnInstances {
-		// fmt.Println("set", idx, button, board[idx])
 		switch button.(type) {
 		case *Button:
 			switch board[idx] {
@@ -1040,27 +1026,25 @@ func (s *GameBoard) SetBoard(board []int32) {
 		case *MessageBox:
 			switch board[idx] {
 			case play:
-				fmt.Println("play", idx)
+				log.Println("play", idx)
 				s.btnInstances[idx].(*MessageBox).Hide = true
 			case won:
 				s.btnInstances[idx].(*MessageBox).SetText("You Win")
 				s.btnInstances[idx].(*MessageBox).Hide = false
-				fmt.Println("win", idx)
+				log.Println("win", idx)
 			case lost:
 				s.btnInstances[idx].(*MessageBox).SetText("Game Over")
 				s.btnInstances[idx].(*MessageBox).Hide = false
-				fmt.Println("game over", idx)
+				log.Println("game over", idx)
 			}
 		}
 	}
 }
 
-func (s *GameBoard) Update(event Event) error {
+func (s *GameBoard) Update(event Event) {
 	if event == WindowResized {
-		fmt.Println("resize gameBoard")
+		log.Println("resize gameBoard")
 		s.Setup()
-	} else if event == NewGameEvent {
-
 	}
 	for idx, button := range s.btnInstances {
 		switch button.(type) {
@@ -1070,56 +1054,52 @@ func (s *GameBoard) Update(event Event) error {
 			s.btnInstances[idx].(*MessageBox).Update()
 		}
 	}
-	return nil
 }
 
-func (s *GameBoard) Render(renderer *sdl.Renderer) (err error) {
-	renderer.SetDrawColor(s.colors[0].R, s.colors[0].G, s.colors[0].B, s.colors[0].A)
-	renderer.DrawRect(&s.rect)
+func (s *GameBoard) Render(renderer *sdl.Renderer) {
 	for _, button := range s.btnInstances {
 		switch button.(type) {
 		case *Button:
-			if err = button.(*Button).Render(renderer); err != nil {
-				panic(err)
-			}
+			button.(*Button).Render(renderer)
 		case *Label:
-			if err = button.(*Label).Render(renderer); err != nil {
-				panic(err)
-			}
+			button.(*Label).Render(renderer)
 		case *MessageBox:
 			if !button.(*MessageBox).Hide {
-				if err = button.(*MessageBox).Render(renderer); err != nil {
-					panic(err)
-				}
+				button.(*MessageBox).Render(renderer)
 			}
 		}
 	}
-	return nil
 }
 
-func (s *GameBoard) Event(event sdl.Event) (e Event, err error) {
+func (s *GameBoard) Event(event sdl.Event) (e Event) {
 	for idx, button := range s.btnInstances {
 		switch t := event.(type) {
 		case *sdl.MouseButtonEvent:
 			switch button.(type) {
 			case *Button:
-				if ok := button.(*Button).Event(event); ok == MouseButtonLeftReleased && s.messageBox.Hide {
+
+				ok := button.(*Button).Event(event)
+				if ok == MouseButtonLeftReleased && s.messageBox.Hide {
+
+					// b := button.(*Button).Event(event)
+					// if ok := button.(*Button).IsReleased(); ok && b == MouseButtonLeftReleased && s.messageBox.Hide {
+					// if ok := button.(*Button).Event(event); ok == MouseButtonLeftReleased && s.messageBox.Hide {
 					s.mousePressedAtButton = int32(idx)
-					return MouseButtonLeftReleasedEvent, nil
+					return MouseButtonLeftReleasedEvent
 				}
 				if ok := button.(*Button).Event(event); ok == MouseButtonRightReleased && s.messageBox.Hide {
 					s.mousePressedAtButton = int32(idx)
-					return MouseButtonRightReleasedEvent, nil
+					return MouseButtonRightReleasedEvent
 				}
 			case *MessageBox:
 				if ok := button.(*MessageBox).Event(event); ok {
-					fmt.Printf("%v MessageBox ok released:%v %v %v\n", idx, t.X, t.Y, button)
+					log.Printf("%v MessageBox ok released:%v %v %v\n", idx, t.X, t.Y, button)
 					s.btnInstances[idx].(*MessageBox).Hide = true
 				}
 			}
 		}
 	}
-	return NilEvent, nil
+	return NilEvent
 }
 
 func (s *GameBoard) Destroy() {
@@ -1482,7 +1462,7 @@ func (s *Field) GetFieldValues() (board []int32) {
 	} else {
 		board = append(board, play)
 	}
-	fmt.Println("send board:", board)
+	log.Println("send board:", board)
 	return board
 }
 
@@ -1535,9 +1515,7 @@ func (s *Mines) Dettach(o Observers) {
 
 func (s *Mines) Notify(e Event) {
 	for _, subscriber := range s.subsribers {
-		if err := subscriber.Update(e); err != nil {
-			panic(err)
-		}
+		subscriber.Update(e)
 	}
 }
 
@@ -1559,6 +1537,10 @@ func (s *View) Setup() (err error) {
 	if err = sdl.Init(sdl.INIT_EVERYTHING); err != nil {
 		panic(err)
 	}
+	err = ttf.Init()
+	if err != nil {
+		panic(err)
+	}
 	if s.window, err = sdl.CreateWindow("Mines", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WinWidth, WinHeight, sdl.WINDOW_SHOWN|sdl.WINDOW_RESIZABLE); err != nil {
 		panic(err)
 	}
@@ -1566,7 +1548,7 @@ func (s *View) Setup() (err error) {
 		panic(err)
 	}
 	sdl.SetHint(sdl.HINT_RENDER_SCALE_QUALITY, "1")
-	s.pushTime = 100
+	s.pushTime = 10
 	s.lastPushTime = sdl.GetTicks()
 	s.flags = 0
 	return nil
@@ -1584,6 +1566,7 @@ func (s *View) Render(o []Observers) (err error) {
 
 func (s *View) GetEvents(o []Observers) (events []Event) {
 	for s.event = sdl.PollEvent(); s.event != nil; s.event = sdl.PollEvent() {
+		// s.event = sdl.WaitEventTimeout(10)
 		switch t := s.event.(type) {
 		case *sdl.QuitEvent:
 			events = append(events, QuitEvent)
@@ -1606,15 +1589,14 @@ func (s *View) GetEvents(o []Observers) (events []Event) {
 				log.Printf("SEND Window Resized")
 			}
 		}
+
 		for _, subscriber := range o {
-			event, err := subscriber.Event(s.event)
-			if err != nil {
-				panic(err)
-			}
+			event := subscriber.Event(s.event)
 			if event != NilEvent {
 				events = append(events, event)
 				return events
 			}
+
 		}
 	}
 	if s.lastPushTime+s.pushTime < sdl.GetTicks() {
@@ -1635,7 +1617,7 @@ func (s *View) GetEvents(o []Observers) (events []Event) {
 :::::::8 :::::::::::::::::::::::::::::::::
 :::::::..:::::::::::::::::::::::::::::::::*/
 func (s *Spinner) Run(m Mines, v View) {
-	defaultSize := boardConfig{row: 5, column: 5, mines: 5}
+	defaultSize := boardConfig{row: row, column: column, mines: mines}
 	rand.Seed(time.Now().UTC().UnixNano())
 	s.mines = m
 	s.mines.New(defaultSize)
