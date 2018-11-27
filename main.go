@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -127,6 +128,11 @@ type (
 		Hide         bool
 		fg, bg       sdl.Color
 	}
+	// Умеет засекать время. Умеет работать с паузой
+	Timer struct {
+		nowTick, startTick, mSec, seconds uint32
+		running, pause                    bool
+	}
 )
 
 // Перечень событий
@@ -189,6 +195,7 @@ const (
 	empty
 	wrongMines
 	play
+	pause
 	won
 	lost
 	marked
@@ -463,6 +470,10 @@ func (s *MessageBox) Setup(rect sdl.Rect, title, message string, fg, bg sdl.Colo
 func (b *MessageBox) Update() (err error) {
 	b.okButton.Update()
 	return nil
+}
+
+func (b *MessageBox) GetText() string {
+	return b.messageLabel.GetLabel()
 }
 
 func (b *MessageBox) SetText(value string) {
@@ -984,6 +995,10 @@ func (s *GameBoard) SetBoard(board []int32, stat []int) {
 			case play:
 				log.Println("play", idx)
 				s.btnInstances[idx].(*MessageBox).Hide = true
+			case pause:
+				s.btnInstances[idx].(*MessageBox).SetText("Pause")
+				s.btnInstances[idx].(*MessageBox).Hide = false
+				log.Println("pause", idx)
 			case won:
 				s.btnInstances[idx].(*MessageBox).SetText("You Win")
 				s.btnInstances[idx].(*MessageBox).Hide = false
@@ -998,6 +1013,11 @@ func (s *GameBoard) SetBoard(board []int32, stat []int) {
 			s.btnInstances[len(s.btnInstances)-2].(*Label).SetLabel(text)
 		}
 	}
+}
+
+func (s *GameBoard) SetTimer(timer []uint32) {
+	text := fmt.Sprintf("%02v:%02v", strconv.Itoa(int(timer[1])), strconv.Itoa(int(timer[0])))
+	s.btnInstances[len(s.btnInstances)-1].(*Label).SetLabel(text)
 }
 
 func (s *GameBoard) Update(event Event) {
@@ -1036,13 +1056,8 @@ func (s *GameBoard) Event(event sdl.Event) (e Event) {
 		case *sdl.MouseButtonEvent:
 			switch button.(type) {
 			case *Button:
-
 				ok := button.(*Button).Event(event)
 				if ok == MouseButtonLeftReleased && s.messageBox.Hide {
-
-					// b := button.(*Button).Event(event)
-					// if ok := button.(*Button).IsReleased(); ok && b == MouseButtonLeftReleased && s.messageBox.Hide {
-					// if ok := button.(*Button).Event(event); ok == MouseButtonLeftReleased && s.messageBox.Hide {
 					s.mousePressedAtButton = int32(idx)
 					return MouseButtonLeftReleasedEvent
 				}
@@ -1052,8 +1067,11 @@ func (s *GameBoard) Event(event sdl.Event) (e Event) {
 				}
 			case *MessageBox:
 				if ok := button.(*MessageBox).Event(event); ok {
-					log.Printf("%v MessageBox ok released:%v %v %v\n", idx, t.X, t.Y, button)
+					if button.(*MessageBox).GetText() == "Pause" {
+						return PauseEvent
+					}
 					s.btnInstances[idx].(*MessageBox).Hide = true
+					log.Printf("%v MessageBox ok released:%v %v %v\n", idx, t.X, t.Y, button)
 				}
 			}
 		}
@@ -1072,6 +1090,88 @@ func (s *GameBoard) Destroy() {
 			button.(*MessageBox).Destroy()
 		}
 	}
+}
+
+/*
+
+ooooo  o
+  8
+  8   o8 ooYoYo. .oPYo. oPYo.
+  8    8 8' 8  8 8oooo8 8  `'
+  8    8 8  8  8 8.     8
+  8    8 8  8  8 `Yooo' 8
+::..:::....:..:..:.....:..::::
+::::::::::::::::::::::::::::::
+::::::::::::::::::::::::::::::*/
+
+func (s *Timer) Reset() {
+	s.running = true
+	s.pause = true
+	s.startTick = s.update()
+	s.mSec = 0
+	s.seconds = 0
+}
+
+func (s *Timer) Start() {
+	s.pause = false
+	s.startTick = s.update()
+	s.nowTick = 0
+	s.pause = false
+}
+
+func (s *Timer) IsPause() bool {
+	return s.pause
+}
+
+func (s *Timer) Pause() {
+	s.pause = true
+}
+
+func (s *Timer) Stop() {
+	if s.running {
+		s.running = false
+	}
+}
+
+func (s *Timer) update() uint32 {
+	// return uint32(time.Now().Nanosecond() / 1000000)
+	return sdl.GetTicks()
+}
+
+func (s *Timer) Update() {
+	if s.running && !s.pause {
+		var diff uint32
+		s.nowTick = s.update()
+		if s.nowTick >= s.startTick {
+			diff = s.nowTick - s.startTick
+		} else {
+			diff = uint32(math.Abs(float64(int(s.startTick - s.nowTick - s.startTick))))
+		}
+		s.mSec += diff
+		if s.mSec >= 1000 {
+			s.mSec -= 1000
+			s.seconds++
+		}
+		s.startTick = s.nowTick
+	}
+}
+
+func (s *Timer) GetTimer() (str string, arr []uint32) {
+	var second, minute, hour, day uint32
+	second = s.seconds % 60
+	minute = s.seconds % 3600 / 60
+	hour = s.seconds % 86400 / 3600
+	day = s.seconds / 86400
+	if day > 0 {
+		str = fmt.Sprintf("day:%v/%v:%v:%v", day, hour, minute, second)
+	} else if day == 0 && hour > 0 {
+		str = fmt.Sprintf("%v:%v:%v", hour, minute, second)
+	} else if day == 0 && hour == 0 && minute > 0 {
+		str = fmt.Sprintf("%v:%v", minute, second)
+	} else if day == 0 && hour == 0 && minute == 0 && second > 0 {
+		str = fmt.Sprintf("%v", second)
+	}
+	return str, append(arr, second, minute, hour, day)
 }
 
 /*
@@ -1424,7 +1524,10 @@ func (s *Field) GetFieldValues() (board []int32) {
 		board = append(board, won)
 	} else if s.state == gameOver {
 		board = append(board, lost)
-	} else {
+	} else if s.state == gamePause {
+		fmt.Println("game set paused")
+		board = append(board, pause)
+	} else if s.state == gamePlay {
 		board = append(board, play)
 	}
 	log.Println("send board:", board)
@@ -1611,6 +1714,9 @@ func (s *Spinner) Run(m Mines, v View) {
 	board := &GameBoard{}
 	board.New(defaultSize, true)
 	s.mines.Attach(board)
+	timer := Timer{}
+	timer.Reset()
+	timer.Start()
 	dirty := true
 	running := true
 	for running {
@@ -1620,9 +1726,22 @@ func (s *Spinner) Run(m Mines, v View) {
 				s.mines.field.New(statusLine.gameBoardSize)
 				board.New(statusLine.gameBoardSize, true)
 				s.mines.field.state = gameStart
+				timer.Reset()
+				timer.Start()
 			case ResetGameEvent:
 				s.mines.field.Reset()
 				board.New(statusLine.gameBoardSize, true)
+				timer.Reset()
+				timer.Start()
+			case PauseEvent:
+				if timer.IsPause() {
+					timer.Start()
+					s.mines.field.state = gamePlay
+				} else {
+					timer.Pause()
+					s.mines.field.state = gamePause
+				}
+				board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
 			case MouseButtonLeftReleasedEvent:
 				if s.mines.field.state == gameStart {
 					s.mines.field.Setup(board.mousePressedAtButton)
@@ -1638,8 +1757,9 @@ func (s *Spinner) Run(m Mines, v View) {
 					} else if cell.IsOpened() {
 						s.mines.field.autoMarkFlags(pos.X, pos.Y)
 					}
-					s.mines.field.isWin()
-					s.mines.field.isGameOver()
+					if s.mines.field.isWin() || s.mines.field.isGameOver() {
+						timer.Stop()
+					}
 					board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
 				}
 			case MouseButtonRightReleasedEvent:
@@ -1675,6 +1795,9 @@ func (s *Spinner) Run(m Mines, v View) {
 				running = false
 			case TickEvent:
 				dirty = true
+				timer.Update()
+				_, arr := timer.GetTimer()
+				board.SetTimer(arr)
 			}
 			s.mines.Notify(event)
 		}
