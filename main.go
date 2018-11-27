@@ -338,7 +338,7 @@ func (s *Button) Setup(rect sdl.Rect, relativePos sdl.Point, text string, fontSi
 }
 
 func (s *Button) GetLabel() string {
-	return s.text
+	return s.label.GetLabel()
 }
 
 func (s *Button) SetLabel(text string) {
@@ -937,7 +937,7 @@ func (s *GameBoard) Setup() {
 	s.messageBox.Hide = true
 	s.btnInstances = append(s.btnInstances, s.messageBox)
 
-	arr := []string{"M00/F00", "00:00"}
+	arr := []string{"F:0/M:0", "00:00"}
 	for dx = 0; dx < int32(len(arr)); dx++ {
 		w = (s.rect.H / int32((len(arr) + 1)))
 		x = s.rect.X + dx*w + w
@@ -948,80 +948,36 @@ func (s *GameBoard) Setup() {
 	}
 	s.start = false
 }
-
-func (s *GameBoard) SetBoard(board []int32) {
+func (s *GameBoard) SetButton(idx int, cell string, fg, bg sdl.Color) {
+	s.btnInstances[idx].(*Button).SetLabel(cell)
+	s.btnInstances[idx].(*Button).SetBackground(bg)
+	s.btnInstances[idx].(*Button).SetForeground(fg)
+}
+func (s *GameBoard) SetBoard(board []int32, stat []int) {
 	for idx, button := range s.btnInstances {
 		switch button.(type) {
 		case *Button:
 			switch board[idx] {
-			case 0:
-				s.btnInstances[idx].(*Button).SetLabel(" ")
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
-			case 1:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[1])
-			case 2:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[2])
-			case 3:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[3])
-			case 4:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[4])
-			case 5:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[5])
-			case 6:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[6])
-			case 7:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
-			case 8:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
-			case mined:
-				s.btnInstances[idx].(*Button).SetLabel("*")
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
-			case firstMined:
-				s.btnInstances[idx].(*Button).SetLabel("*")
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[3])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[8])
-			case closed:
-				s.btnInstances[idx].(*Button).SetLabel(" ")
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[8])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
-			case flagged:
-				s.btnInstances[idx].(*Button).SetLabel("F")
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
-			case questionable:
-				s.btnInstances[idx].(*Button).SetLabel("?")
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
-			case saved:
-				s.btnInstances[idx].(*Button).SetLabel("V")
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
-			case blown:
-				s.btnInstances[idx].(*Button).SetLabel("b")
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
 			case wrongMines:
-				s.btnInstances[idx].(*Button).SetLabel(strconv.Itoa(int(board[idx])))
-				s.btnInstances[idx].(*Button).SetBackground(s.colors[0])
-				s.btnInstances[idx].(*Button).SetForeground(s.colors[7])
+				s.SetButton(idx, strconv.Itoa(int(board[idx])), s.colors[7], s.colors[8])
+			case 0:
+				s.SetButton(idx, " ", s.colors[7], s.colors[0])
+			case 1, 2, 3, 4, 5, 6, 7, 8:
+				s.SetButton(idx, strconv.Itoa(int(board[idx])), s.colors[board[idx]], s.colors[0])
+			case mined:
+				s.SetButton(idx, "*", s.colors[7], s.colors[0])
+			case firstMined:
+				s.SetButton(idx, "*", s.colors[3], s.colors[8])
+			case closed:
+				s.SetButton(idx, " ", s.colors[7], s.colors[8])
+			case flagged:
+				s.SetButton(idx, "F", s.colors[7], s.colors[0])
+			case questionable:
+				s.SetButton(idx, "?", s.colors[7], s.colors[0])
+			case saved:
+				s.SetButton(idx, "V", s.colors[7], s.colors[0])
+			case blown:
+				s.SetButton(idx, "b", s.colors[7], s.colors[0])
 			}
 		case *MessageBox:
 			switch board[idx] {
@@ -1037,6 +993,9 @@ func (s *GameBoard) SetBoard(board []int32) {
 				s.btnInstances[idx].(*MessageBox).Hide = false
 				log.Println("game over", idx)
 			}
+		case *Label:
+			text := fmt.Sprintf("F:%v/M:%v", strconv.Itoa(stat[1]), strconv.Itoa(stat[0]-stat[1]))
+			s.btnInstances[len(s.btnInstances)-2].(*Label).SetLabel(text)
 		}
 	}
 }
@@ -1144,34 +1103,38 @@ func (s *Cell) GetState() int32 {
 func (s *Cell) SetState(value int32) {
 	s.state = value
 }
+
+// есть ли мина
 func (s *Cell) GetMines() bool {
 	return s.mined
 }
-func (s *Cell) GetMined() bool {
+
+// состояние заминировано
+func (s *Cell) IsMined() bool {
 	return s.state == mined
 }
 func (s *Cell) SetMines() {
 	s.mined = true
 }
-func (s *Cell) GetFirstMines() bool {
+func (s *Cell) IsFirstMines() bool {
 	return s.state == firstMined
 }
 func (s *Cell) SetFirstMines() {
 	s.state = firstMined
 }
-func (s *Cell) GetSavedMines() bool {
+func (s *Cell) IsSavedMines() bool {
 	return s.state == saved
 }
 func (s *Cell) SetSavedMines() {
 	s.state = saved
 }
-func (s *Cell) GetBlownMines() bool {
+func (s *Cell) IsBlownMines() bool {
 	return s.state == blown
 }
 func (s *Cell) SetBlownMines() {
 	s.state = blown
 }
-func (s *Cell) GetWrongMines() bool {
+func (s *Cell) IsWrongMines() bool {
 	return s.state == wrongMines
 }
 func (s *Cell) SetWrongMines() {
@@ -1183,22 +1146,22 @@ func (s *Cell) GetNumber() int32 {
 func (s *Cell) SetNumber(value int32) {
 	s.counter = value
 }
-func (s *Cell) GetClosed() bool {
+func (s *Cell) IsClosed() bool {
 	return s.state == closed
 }
 func (s *Cell) SetClosed() {
 	s.state = closed
 }
-func (s *Cell) GetOpened() bool {
+func (s *Cell) IsOpened() bool {
 	return s.state == opened
 }
-func (s *Cell) GetFlagged() bool {
+func (s *Cell) IsFlagged() bool {
 	return s.state == flagged
 }
 func (s *Cell) SetFlagged() {
 	s.state = flagged
 }
-func (s *Cell) GetQuestioned() bool {
+func (s *Cell) IsQuestioned() bool {
 	return s.state == questionable
 }
 func (s *Cell) SetQuestioned() {
@@ -1349,7 +1312,7 @@ func (s *Field) Open(x, y int32) {
 		return
 	}
 	_, cell := s.getIdxOfCell(x, y)
-	if cell.GetFlagged() || cell.GetOpened() {
+	if cell.IsFlagged() || cell.IsOpened() {
 		return
 	}
 	cell.Open()
@@ -1369,21 +1332,21 @@ func (s *Field) Open(x, y int32) {
 func (s *Field) autoMarkFlags(x, y int32) {
 	var countFlags, countClosed, countOpened int32
 	_, cell := s.getIdxOfCell(x, y)
-	if cell.GetOpened() {
+	if cell.IsOpened() {
 		neighbours := s.getNeighbours(x, y)
 		for _, cell := range neighbours {
-			if cell.GetFlagged() {
+			if cell.IsFlagged() {
 				countFlags++
-			} else if cell.GetClosed() {
+			} else if cell.IsClosed() {
 				countClosed++
-			} else if cell.GetOpened() {
+			} else if cell.IsOpened() {
 				countOpened++
 			}
 		}
 	}
 	if countClosed+countFlags == cell.GetNumber() {
 		for _, nCell := range s.getNeighbours(x, y) {
-			if nCell.GetClosed() {
+			if nCell.IsClosed() {
 				nCell.SetFlagged()
 			}
 		}
@@ -1405,7 +1368,7 @@ func (s *Field) MarkFlag(idx int32) {
 func (s *Field) isWin() bool {
 	var count int32
 	for _, cell := range s.field {
-		if cell.GetOpened() {
+		if cell.IsOpened() {
 			count++
 		}
 	}
@@ -1424,10 +1387,10 @@ func (s *Field) isWin() bool {
 func (s *Field) isGameOver() bool {
 	if s.state == gameOver {
 		for idx, cell := range s.field[:] {
-			if cell.GetMines() && cell.GetClosed() {
+			if cell.GetMines() && cell.IsClosed() {
 				s.field[idx].Open()
 				s.field[idx].SetBlownMines()
-			} else if cell.GetFlagged() && cell.GetMines() {
+			} else if cell.IsFlagged() && cell.GetMines() {
 				s.field[idx].SetSavedMines()
 			}
 		}
@@ -1442,14 +1405,16 @@ func (s *Field) GetFieldValues() (board []int32) {
 		if cell.state == closed || cell.state == flagged || cell.state == questionable {
 			board = append(board, cell.state)
 		} else if cell.state >= opened {
-			if cell.GetFirstMines() {
+			if cell.IsFirstMines() {
 				board = append(board, firstMined)
-			} else if cell.GetMined() {
+			} else if cell.IsMined() {
 				board = append(board, mined)
-			} else if cell.GetSavedMines() {
+			} else if cell.IsSavedMines() {
 				board = append(board, saved)
-			} else if cell.GetBlownMines() {
+			} else if cell.IsBlownMines() {
 				board = append(board, blown)
+			} else if cell.IsWrongMines() {
+				board = append(board, wrongMines)
 			} else {
 				board = append(board, cell.counter)
 			}
@@ -1464,6 +1429,22 @@ func (s *Field) GetFieldValues() (board []int32) {
 	}
 	log.Println("send board:", board)
 	return board
+}
+
+func (s *Field) GetStatistic() (stat []int) {
+	var mines, flags, questions int
+	for _, cell := range s.field {
+		if cell.GetMines() {
+			mines++
+		}
+		if cell.IsFlagged() || cell.IsSavedMines() {
+			flags++
+		} else if cell.IsQuestioned() {
+			questions++
+		}
+	}
+	fmt.Printf("Get Staticstic mines:%v flags:%v questions:%v\n", mines, flags, questions)
+	return append(stat, mines, flags, questions)
 }
 
 func (s *Field) String() string {
@@ -1646,25 +1627,25 @@ func (s *Spinner) Run(m Mines, v View) {
 				if s.mines.field.state == gameStart {
 					s.mines.field.Setup(board.mousePressedAtButton)
 					pos, cell := s.mines.field.getPosOfCell(board.mousePressedAtButton)
-					if cell.GetClosed() {
+					if cell.IsClosed() {
 						s.mines.field.Open(pos.X, pos.Y)
 					}
-					board.SetBoard(s.mines.field.GetFieldValues())
+					board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
 				} else if s.mines.field.state == gamePlay {
 					pos, cell := s.mines.field.getPosOfCell(board.mousePressedAtButton)
-					if cell.GetClosed() {
+					if cell.IsClosed() {
 						s.mines.field.Open(pos.X, pos.Y)
-					} else if cell.GetOpened() {
+					} else if cell.IsOpened() {
 						s.mines.field.autoMarkFlags(pos.X, pos.Y)
 					}
 					s.mines.field.isWin()
 					s.mines.field.isGameOver()
-					board.SetBoard(s.mines.field.GetFieldValues())
+					board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
 				}
 			case MouseButtonRightReleasedEvent:
 				if s.mines.field.state == gamePlay {
 					s.mines.field.MarkFlag(board.mousePressedAtButton)
-					board.SetBoard(s.mines.field.GetFieldValues())
+					board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
 				}
 				// board
 			case IncRowEvent: // Replace game board size by arrows
