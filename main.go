@@ -103,14 +103,11 @@ type (
 	}
 	// Стрелки умеет отпралять события нажатия и уже другие наблюдатели на эти события реагируют
 	Arrow struct {
-		rect                          sdl.Rect
-		text                          string
-		fgColor, bgColor              sdl.Color
-		buttons                       []buttonsData
-		btnInstances                  []interface{}
-		count                         int
-		pushTime, lastPushTime, delay uint32
-		repeat                        bool
+		rect             sdl.Rect
+		text             string
+		fgColor, bgColor sdl.Color
+		buttons          []buttonsData
+		btnInstances     []interface{}
 	}
 	// Указатель мыши нужен для обработки нажатий кнопки
 	MouseCursor struct {
@@ -172,14 +169,6 @@ const (
 	buttonDec
 	buttonInc
 	label
-)
-
-// события от кнопок мышки
-const (
-	MouseButtonLeftPressed int = iota + 300
-	MouseButtonLeftReleased
-	MouseButtonRightPressed
-	MouseButtonRightReleased
 )
 
 // состояния ячеек минного поля
@@ -249,7 +238,7 @@ func (s *Label) Setup(pos sdl.Point, text string, fontSize int, fg sdl.Color) {
 	s.text = text
 	s.fg = fg
 	var err error
-	fontName := "data/Roboto-Regular.ttf"
+	fontName := "assets/Roboto-Regular.ttf"
 	if s.font, err = ttf.OpenFont(fontName, s.fontSize); err != nil {
 		panic(err)
 	}
@@ -384,26 +373,26 @@ func (s *Button) IsReleased() bool {
 	return !s.pressed && s.mouse.InRect(s.GetRect())
 }
 
-func (s *Button) Event(event sdl.Event) int {
+func (s *Button) Event(event sdl.Event) Event {
 	s.mouse.Update()
 	switch t := event.(type) {
 	case *sdl.MouseButtonEvent:
-		if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_LEFT && t.State == 1 {
+		if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_LEFT && t.State == sdl.PRESSED {
 			s.pressed = true
 			log.Printf("Button: SEND left mouse button pressed:%v\n", s.text)
-			return MouseButtonLeftPressed
-		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_LEFT && t.State == 0 {
+			return MouseButtonLeftPressedEvent
+		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_LEFT && t.State == sdl.RELEASED {
 			s.pressed = false
 			log.Printf("Button: SEND left mouse button released:%v\n", s.text)
-			return MouseButtonLeftReleased
-		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_RIGHT && t.State == 1 {
+			return MouseButtonLeftReleasedEvent
+		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_RIGHT && t.State == sdl.PRESSED {
 			s.pressed = true
 			log.Printf("Button: SEND right mouse button pressed:%v\n", s.text)
-			return MouseButtonRightPressed
-		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_RIGHT && t.State == 0 {
+			return MouseButtonRightPressedEvent
+		} else if s.mouse.InRect(s.GetRect()) && t.Button == sdl.BUTTON_RIGHT && t.State == sdl.RELEASED {
 			s.pressed = false
 			log.Printf("Button: SEND right mouse button released:%v\n", s.text)
-			return MouseButtonRightReleased
+			return MouseButtonRightReleasedEvent
 		}
 	}
 	return -1
@@ -493,10 +482,9 @@ func (b *MessageBox) Render(renderer *sdl.Renderer) (err error) {
 }
 
 func (b *MessageBox) Event(event sdl.Event) (pressed bool) {
-	pressed = false
 	switch event.(type) {
 	case *sdl.MouseButtonEvent:
-		if ok := b.okButton.Event(event); ok == MouseButtonLeftReleased && !b.Hide {
+		if ok := b.okButton.Event(event); ok == MouseButtonLeftReleasedEvent && !b.Hide {
 			pressed = true
 		}
 	}
@@ -545,7 +533,6 @@ func (t *Arrow) New(rect sdl.Rect, text string, fgColor, bgColor sdl.Color, font
 			t.btnInstances = append(t.btnInstances, lbl)
 		}
 	}
-	t.delay = 250
 	return nil
 }
 
@@ -595,15 +582,14 @@ func (s *Arrow) Event(event sdl.Event) (e Event) {
 		case *sdl.MouseButtonEvent:
 			switch button.(type) {
 			case *Button:
-				ok := button.(*Button).Event(event)
-				if ok == MouseButtonLeftReleased {
+				if ok := button.(*Button).Event(event); ok == MouseButtonLeftReleasedEvent {
 					for i := 0; i < len(s.buttons[idx].event); i++ {
 						switch s.buttons[idx].event[i] {
 						case DecButtonEvent:
-							log.Println("released dec", s.lastPushTime, s.delay, sdl.GetTicks(), s.lastPushTime+s.delay, ok)
+							log.Println("Arrow:released dec", ok)
 							return DecButtonEvent
 						case IncButtonEvent:
-							log.Println("released inc", s.lastPushTime, s.delay, sdl.GetTicks(), s.lastPushTime+s.delay, ok)
+							log.Println("Arrow:released inc", ok)
 							return IncButtonEvent
 						}
 					}
@@ -768,7 +754,7 @@ func (s *StatusLine) Event(event sdl.Event) (e Event) {
 			switch button.(type) {
 			case *Button:
 				b := button.(*Button).Event(event)
-				if ok := button.(*Button).IsReleased(); ok && b == MouseButtonLeftReleased {
+				if ok := button.(*Button).IsReleased(); ok && b == MouseButtonLeftReleasedEvent {
 					for i := 0; i < len(s.buttons[idx].event); i++ {
 						switch s.buttons[idx].event[i] {
 						case QuitEvent:
@@ -948,7 +934,9 @@ func (s *GameBoard) Setup() {
 	s.messageBox.Hide = true
 	s.btnInstances = append(s.btnInstances, s.messageBox)
 
-	arr := []string{"F:0/M:0", "00:00"}
+	text := fmt.Sprintf("F:%v/M:%v", 0, strconv.Itoa(int(s.gameBoardSize.mines)))
+
+	arr := []string{text, "00:00"}
 	for dx = 0; dx < int32(len(arr)); dx++ {
 		w = (s.rect.H / int32((len(arr) + 1)))
 		x = s.rect.X + dx*w + w
@@ -1057,11 +1045,11 @@ func (s *GameBoard) Event(event sdl.Event) (e Event) {
 			switch button.(type) {
 			case *Button:
 				ok := button.(*Button).Event(event)
-				if ok == MouseButtonLeftReleased && s.messageBox.Hide {
+				if ok == MouseButtonLeftReleasedEvent && s.messageBox.Hide {
 					s.mousePressedAtButton = int32(idx)
 					return MouseButtonLeftReleasedEvent
 				}
-				if ok := button.(*Button).Event(event); ok == MouseButtonRightReleased && s.messageBox.Hide {
+				if ok := button.(*Button).Event(event); ok == MouseButtonRightReleasedEvent && s.messageBox.Hide {
 					s.mousePressedAtButton = int32(idx)
 					return MouseButtonRightReleasedEvent
 				}
@@ -1336,7 +1324,7 @@ func (s *Field) New(boardSize boardConfig) (err error) {
 			s.field = append(s.field, cell)
 		}
 	}
-	s.state = gameStart
+	s.SetState(gameStart)
 	return nil
 }
 
@@ -1367,7 +1355,7 @@ func (s *Field) Setup(firstMoveIdx int32) {
 			s.field[idx].SetNumber(count)
 		}
 	}
-	s.state = gamePlay
+	s.SetState(gamePlay)
 }
 
 func (s *Field) isFieldEdge(x, y int32) bool {
@@ -1405,7 +1393,7 @@ func (s *Field) Reset() {
 	for idx, _ := range s.field {
 		s.field[idx].Reset()
 	}
-	s.state = gamePlay
+	s.SetState(gamePlay)
 }
 func (s *Field) Open(x, y int32) {
 	if s.isFieldEdge(x, y) {
@@ -1418,7 +1406,7 @@ func (s *Field) Open(x, y int32) {
 	cell.Open()
 	if cell.GetMines() {
 		cell.SetFirstMines()
-		s.state = gameOver
+		s.SetState(gameOver)
 		return
 	}
 	if cell.GetNumber() > 0 {
@@ -1478,14 +1466,14 @@ func (s *Field) isWin() bool {
 				s.field[idx].SetSavedMines()
 			}
 		}
-		s.state = gameWin
+		s.SetState(gameWin)
 		return true
 	}
 	return false
 }
 
 func (s *Field) isGameOver() bool {
-	if s.state == gameOver {
+	if s.GetState() == gameOver {
 		for idx, cell := range s.field[:] {
 			if cell.GetMines() && cell.IsClosed() {
 				s.field[idx].Open()
@@ -1520,14 +1508,14 @@ func (s *Field) GetFieldValues() (board []int32) {
 			}
 		}
 	}
-	if s.state == gameWin {
+	if s.GetState() == gameWin {
 		board = append(board, won)
-	} else if s.state == gameOver {
+	} else if s.GetState() == gameOver {
 		board = append(board, lost)
-	} else if s.state == gamePause {
+	} else if s.GetState() == gamePause {
 		fmt.Println("game set paused")
 		board = append(board, pause)
-	} else if s.state == gamePlay {
+	} else if s.GetState() == gamePlay {
 		board = append(board, play)
 	}
 	log.Println("send board:", board)
@@ -1548,6 +1536,14 @@ func (s *Field) GetStatistic() (stat []int) {
 	}
 	fmt.Printf("Get Staticstic mines:%v flags:%v questions:%v\n", mines, flags, questions)
 	return append(stat, mines, flags, questions)
+}
+
+func (s *Field) GetState() minesStateType {
+	return s.state
+}
+
+func (s *Field) SetState(state minesStateType) {
+	s.state = state
 }
 
 func (s *Field) String() string {
@@ -1597,6 +1593,7 @@ func (s *Mines) Dettach(o Observers) {
 	}
 }
 
+// Передать имеющиеся сообщения подписчикам
 func (s *Mines) Notify(e Event) {
 	for _, subscriber := range s.subsribers {
 		subscriber.Update(e)
@@ -1649,39 +1646,37 @@ func (s *View) Render(o []Observers) (err error) {
 }
 
 func (s *View) GetEvents(o []Observers) (events []Event) {
-	for s.event = sdl.PollEvent(); s.event != nil; s.event = sdl.PollEvent() {
-		// s.event = sdl.WaitEventTimeout(10)
-		switch t := s.event.(type) {
-		case *sdl.QuitEvent:
+	s.event = sdl.WaitEventTimeout(10)
+	switch t := s.event.(type) {
+	case *sdl.QuitEvent:
+		events = append(events, QuitEvent)
+		log.Printf("SEND Quit")
+		return events
+	case *sdl.KeyboardEvent:
+		if t.Keysym.Sym == sdl.K_ESCAPE && t.State == sdl.RELEASED {
 			events = append(events, QuitEvent)
-			log.Printf("SEND Quit")
+			log.Printf("SEND Quit by escape")
 			return events
-		case *sdl.KeyboardEvent:
-			if t.Keysym.Sym == sdl.K_ESCAPE && t.State == sdl.RELEASED {
-				events = append(events, QuitEvent)
-				log.Printf("SEND Quit by escape")
-				return events
-			} else if t.Keysym.Sym == sdl.K_F11 && t.State == sdl.RELEASED {
-				events = append(events, FullScreenToggleEvent)
-				log.Printf("SEND window resize by F11")
-				return events
-			}
-		case *sdl.WindowEvent:
-			if t.Event == sdl.WINDOWEVENT_RESIZED {
-				WinWidth, WinHeight = t.Data1, t.Data2
-				events = append(events, WindowResized)
-				log.Printf("SEND Window Resized")
-			}
+		} else if t.Keysym.Sym == sdl.K_F11 && t.State == sdl.RELEASED {
+			events = append(events, FullScreenToggleEvent)
+			log.Printf("SEND window resize by F11")
+			return events
+		}
+	case *sdl.WindowEvent:
+		if t.Event == sdl.WINDOWEVENT_RESIZED {
+			WinWidth, WinHeight = t.Data1, t.Data2
+			events = append(events, WindowResized)
+			log.Printf("SEND Window Resized")
+		}
+	}
+
+	for _, subscriber := range o {
+		event := subscriber.Event(s.event)
+		if event != NilEvent {
+			events = append(events, event)
+			return events
 		}
 
-		for _, subscriber := range o {
-			event := subscriber.Event(s.event)
-			if event != NilEvent {
-				events = append(events, event)
-				return events
-			}
-
-		}
 	}
 	if s.lastPushTime+s.pushTime < sdl.GetTicks() {
 		s.lastPushTime = sdl.GetTicks()
@@ -1725,7 +1720,7 @@ func (s *Spinner) Run(m Mines, v View) {
 			case NewGameEvent:
 				s.mines.field.New(statusLine.gameBoardSize)
 				board.New(statusLine.gameBoardSize, true)
-				s.mines.field.state = gameStart
+				s.mines.field.SetState(gameStart)
 				timer.Reset()
 				timer.Start()
 			case ResetGameEvent:
@@ -1734,23 +1729,23 @@ func (s *Spinner) Run(m Mines, v View) {
 				timer.Reset()
 				timer.Start()
 			case PauseEvent:
-				if timer.IsPause() {
+				if timer.IsPause() && s.mines.field.GetState() == gamePause {
 					timer.Start()
-					s.mines.field.state = gamePlay
-				} else {
+					s.mines.field.SetState(gamePlay)
+				} else if s.mines.field.GetState() == gamePlay {
 					timer.Pause()
-					s.mines.field.state = gamePause
+					s.mines.field.SetState(gamePause)
 				}
 				board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
 			case MouseButtonLeftReleasedEvent:
-				if s.mines.field.state == gameStart {
+				if s.mines.field.GetState() == gameStart {
 					s.mines.field.Setup(board.mousePressedAtButton)
 					pos, cell := s.mines.field.getPosOfCell(board.mousePressedAtButton)
 					if cell.IsClosed() {
 						s.mines.field.Open(pos.X, pos.Y)
 					}
 					board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
-				} else if s.mines.field.state == gamePlay {
+				} else if s.mines.field.GetState() == gamePlay {
 					pos, cell := s.mines.field.getPosOfCell(board.mousePressedAtButton)
 					if cell.IsClosed() {
 						s.mines.field.Open(pos.X, pos.Y)
@@ -1763,7 +1758,7 @@ func (s *Spinner) Run(m Mines, v View) {
 					board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
 				}
 			case MouseButtonRightReleasedEvent:
-				if s.mines.field.state == gamePlay {
+				if s.mines.field.GetState() == gamePlay {
 					s.mines.field.MarkFlag(board.mousePressedAtButton)
 					board.SetBoard(s.mines.field.GetFieldValues(), s.mines.field.GetStatistic())
 				}
