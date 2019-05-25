@@ -22,10 +22,12 @@ type Screen struct {
 	font                   *ttf.Font
 	flags                  uint32
 	running                bool
-	bg, fg                 sdl.Color
+	bg, fg, bgMenu, fgMenu sdl.Color
 	fpsCountTime, fpsCount uint32
 	sprites                []Sprite
-	lblTitle               *Label
+	menuLine               *MenuLine
+	statusLine             *StatusLine
+	statusLineMessage      string
 }
 
 func NewScreen(title string, window *sdl.Window, renderer *sdl.Renderer, width, height int32) *Screen {
@@ -37,6 +39,8 @@ func NewScreen(title string, window *sdl.Window, renderer *sdl.Renderer, width, 
 		height:   height,
 		bg:       sdl.Color{192, 192, 192, 0},
 		fg:       sdl.Color{0, 0, 0, 255},
+		fgMenu:   sdl.Color{0, 0, 0, 255},
+		bgMenu:   sdl.Color{128, 128, 128, 0},
 	}
 }
 
@@ -48,8 +52,11 @@ func (s *Screen) setup() {
 		panic(err)
 	}
 
-	s.lblTitle = NewLabel(s.title, sdl.Point{10, 0}, s.fg, s.renderer, s.font)
-	s.sprites = append(s.sprites, s.lblTitle)
+	s.menuLine = NewMenuLine(s.title, sdl.Rect{0, 0, s.width, int32(float64(fontSize) * 1.5)}, s.fgMenu, s.bgMenu, s.renderer, s.font, s.quit)
+	s.sprites = append(s.sprites, s.menuLine)
+	s.statusLine = NewStatusLine("test message", sdl.Rect{0, s.height - int32(float64(fontSize)*1.5), s.width, int32(float64(fontSize) * 1.5)}, s.fgMenu, s.bgMenu, s.renderer, s.font)
+	s.statusLineMessage = "test message"
+	s.sprites = append(s.sprites, s.statusLine)
 }
 
 func (s *Screen) setMode() {
@@ -105,8 +112,12 @@ func (s *Screen) Event() {
 }
 
 func (s *Screen) Update() {
+	for _, sprite := range s.sprites {
+		sprite.Update()
+	}
 	if sdl.GetTicks()-s.fpsCountTime > 999 {
 		s.window.SetTitle(fmt.Sprintf("%s fps:%v", s.title, s.fpsCount))
+		s.statusLine.SetMessage(fmt.Sprintf("fps:%v : %v", s.fpsCount, s.statusLineMessage))
 		s.fpsCount = 0
 		s.fpsCountTime = sdl.GetTicks()
 	}
