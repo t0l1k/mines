@@ -63,6 +63,10 @@ func newButtonTexture(renderer *sdl.Renderer, str string, rect sdl.Rect, fg, bg 
 	return buttonTexture
 }
 
+func (s *Button) GetText() string {
+	return s.str
+}
+
 func (s *Button) SetText(str string) {
 	if s.show {
 		s.Destroy()
@@ -99,6 +103,10 @@ func (s *Button) SetPos(pos sdl.Point) {
 	s.rect.Y = pos.Y
 }
 
+func (s *Button) IsPressed() bool {
+	return s.pressed
+}
+
 func (s *Button) Render(renderer *sdl.Renderer) {
 	if s.show {
 		if s.focus && !s.pressed {
@@ -128,8 +136,9 @@ func (s *Button) Update() {
 		}
 		if s.focus && state > 0 {
 			s.pressed = true
+
+		} else if s.focus && state == 0 && s.pressed {
 			s.fn()
-		} else {
 			s.pressed = false
 		}
 	}

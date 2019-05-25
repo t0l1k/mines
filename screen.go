@@ -28,6 +28,7 @@ type Screen struct {
 	menuLine               *MenuLine
 	statusLine             *StatusLine
 	statusLineMessage      string
+	boxDifficult           *BoxDifficult
 }
 
 func NewScreen(title string, window *sdl.Window, renderer *sdl.Renderer, width, height int32) *Screen {
@@ -51,12 +52,33 @@ func (s *Screen) setup() {
 	if err != nil {
 		panic(err)
 	}
-
-	s.menuLine = NewMenuLine(s.title, sdl.Rect{0, 0, s.width, int32(float64(fontSize) * 1.5)}, s.fgMenu, s.bgMenu, s.renderer, s.font, s.quit)
+	lineHeight := int32(float64(fontSize) * 1.5)
+	s.menuLine = NewMenuLine(s.title, sdl.Rect{0, 0, s.width, lineHeight}, s.fgMenu, s.bgMenu, s.renderer, s.font, s.quit)
 	s.sprites = append(s.sprites, s.menuLine)
-	s.statusLine = NewStatusLine("test message", sdl.Rect{0, s.height - int32(float64(fontSize)*1.5), s.width, int32(float64(fontSize) * 1.5)}, s.fgMenu, s.bgMenu, s.renderer, s.font)
+	s.statusLine = NewStatusLine("test message", sdl.Rect{0, s.height - lineHeight, s.width, lineHeight}, s.fgMenu, s.bgMenu, s.renderer, s.font)
 	s.statusLineMessage = "test message"
 	s.sprites = append(s.sprites, s.statusLine)
+	var x, y, w, h int32
+	w = int32(float32(s.width) * 0.5)
+	h = int32(float32(s.height-lineHeight*2) * 0.25)
+	x = (s.width - w) / 2
+	y = (s.height - h) / 2
+	s.boxDifficult = NewBoxDifficult(sdl.Rect{x, y, w, h}, s.fg, s.bg, s.renderer, s.font, func() {
+		for _, sprite := range s.boxDifficult.sprites {
+			switch sprite {
+			case sprite.(*Button):
+				if sprite.(*Button).IsPressed() {
+					for _, line := range s.boxDifficult.difficltLines {
+						if line.name == sprite.(*Button).GetText() {
+							fmt.Println("pressed", line)
+						}
+					}
+					s.boxDifficult.Show(false)
+				}
+			}
+		}
+	})
+	s.sprites = append(s.sprites, s.boxDifficult)
 }
 
 func (s *Screen) setMode() {
