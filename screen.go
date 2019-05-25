@@ -25,6 +25,7 @@ type Screen struct {
 	bg, fg                 sdl.Color
 	fpsCountTime, fpsCount uint32
 	sprites                []Sprite
+	lblTitle               *Label
 }
 
 func NewScreen(title string, window *sdl.Window, renderer *sdl.Renderer, width, height int32) *Screen {
@@ -46,6 +47,9 @@ func (s *Screen) setup() {
 	if err != nil {
 		panic(err)
 	}
+
+	s.lblTitle = NewLabel(s.title, sdl.Point{10, 0}, s.fg, s.renderer, s.font)
+	s.sprites = append(s.sprites, s.lblTitle)
 }
 
 func (s *Screen) setMode() {
